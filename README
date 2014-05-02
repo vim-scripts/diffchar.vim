@@ -1,0 +1,27 @@
+This is a mirror of http://www.vim.org/scripts/script.php?script_id=4932
+
+This script has been developed in order to make diff mode more useful. DiffText does not show the exact difference, but this script will highlight its difference, character by character - so called DiffChar.
+
+Use this script just after diff command. DiffText area will be narrowed down to show the DiffChar. You can use this script in non-diff'ed usual mode as well.
+
+For example, diff command shows: (<|DiffText area|>) 
+
+     (file A) The <|swift brown fox jumped over the lazy|> dog. 
+     (file B) The <|lazy fox jumped over the swift brown|> dog. 
+
+then this script will narrow down the DiffText area: 
+
+     (file A) The <|swift brown|> fox jumped over the <|lazy|> dog. 
+     (file B) The <|lazy|> fox jumped over the<| swift|> <|brown|> dog. 
+
+Sample commands:
+:[range]SDChar (Highlight DiffChar for [range])
+:RDChar (Reset DiffChar)
+
+Sample keymaps:
+<F7> (for all lines and toggle the DiffChar highlight)
+<F8> (for current line and toggle the DiffChar highlight)
+
+Note that this script assumes that there have been only 2 windows and both windows have same number of lines displayed. And try to compare the text on the same line in both windows. If DiffAdd and/or DiffDelete lines exist, it might work incorrectly.
+
+The character comparing algorism in this scrip is a very basic one. So it might be necessary to improve the performance with other enhanced algorisms.
