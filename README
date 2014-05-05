@@ -1,5 +1,11 @@
 This is a mirror of http://www.vim.org/scripts/script.php?script_id=4932
 
+Update : 2.1
+* Coding changes in the O(NP) function for readability.
+
+Update : 2.0
+* Implemented the O(NP) and O(ND) Difference algorithms to improve the performance. This update uses the O(NP) by default, and can be changed to the O(ND) if necessary, or to the basic algorithm implemented in the initial version.
+
 This script has been developed in order to make diff mode more useful. DiffText does not show the exact difference, but this script will highlight its difference, character by character - so called DiffChar.
 
 Use this script just after diff command. DiffText area will be narrowed down to show the DiffChar. You can use this script in non-diff'ed usual mode as well.
@@ -23,5 +29,3 @@ Sample keymaps:
 <F8> (for current line and toggle the DiffChar highlight)
 
 Note that this script assumes that there have been only 2 windows and both windows have same number of lines displayed. And try to compare the text on the same line in both windows. If DiffAdd and/or DiffDelete lines exist, it might work incorrectly.
-
-The character comparing algorism in this scrip is a very basic one. So it might be necessary to improve the performance with other enhanced algorisms.
