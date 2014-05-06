@@ -1,5 +1,8 @@
 " diffchar.vim - Highlight the difference, character by character
 "
+" Update : 2.1
+" * Coding changes in the O(NP) function for readability.
+"
 " Update : 2.0
 " * Implemented the O(NP) and O(ND) Difference algorithms to improve the
 "   performance. This update uses the O(NP) by default, and can be changed
@@ -38,10 +41,10 @@
 " lines exist, it might work incorrectly.
 "
 " Author: Rick Howe
-" Last Change: 2014/5/5
+" Last Change: 2014/5/6
 " Created:
 " Requires:
-" Version: 2.0
+" Version: 2.1
 
 " sample commands
 command! -range SDChar :call s:ShowDiffChar(<line1>, <line2>)
@@ -53,6 +56,8 @@ map <F8> :call <SID>ToggleDiffChar(line('.'))<CR>
 
 " Set a difference algorithm function, ONP, OND, or Basic
 let s:DiffAlgorithm = "ONP"
+" let s:DiffAlgorithm = "OND"
+" let s:DiffAlgorithm = "Basic"
 
 let s:diffchar = 0
 function! s:ToggleDiffChar(...)
@@ -73,7 +78,7 @@ endfunction
 function! s:ResetDiffChar()
 	let w = winnr()
 	windo call clearmatches()
-	exec w .'wincmd w'
+	exec w . 'wincmd w'
 endfunction
 
 function! s:ShowDiffChar(sln, eln)
@@ -168,49 +173,66 @@ endfunction
 
 " O(NP) Difference algorithm
 function! s:TraceDiffCharONP(s1, s2)
-	let s:s1 = split(a:s1, '\zs')
-	let s:s2 = split(a:s2, '\zs')
-	let n1 = len(s:s1)
-	let n2 = len(s:s2)
+	let s1 = split(a:s1, '\zs')
+	let s2 = split(a:s2, '\zs')
+	let n1 = len(s1)
+	let n2 = len(s2)
 	if n1 == 0 && n2 == 0 | return [] | endif
-	
+
 	" reverse to be N <= M, s2 <= s1
 	if n1 > n2
 		let rev = 0
-		let s:M = n1 | let s:N = n2
+		let M = n1 | let N = n2
 	else
 		let rev = 1
-		let s:M = n2 | let s:N = n1
-		let sx = s:s1 | let s:s1 = s:s2 | let s:s2 = sx
+		let M = n2 | let N = n1
+		let sx = s1 | let s1 = s2 | let s2 = sx
 	endif
 
-	let s:fp = repeat([-1], s:M + s:N + 3)
-	let s:offset = s:N + 1
-	let delta = s:M - s:N
-	let s:dtree = []	" [next direction, previous p, previous k]
+	let fp = repeat([-1], M + N + 3)
+	let offset = N + 1
+	let delta = M - N
+	let dtree = []	" [next direction, previous p, previous k]
 
-	let s:p = 0
+	let p = 0
 	while 1
-		call add(s:dtree, repeat([['', 0, 0]], len(range(-s:p, delta + s:p))))
-		for k in range(-s:p, delta - 1, 1)
-			let s:fp[k + s:offset] = s:Snake(k, 'A')
+		call add(dtree, repeat([['', 0, 0]], p * 2 + delta + 1))
+		for [k, r] in map(range(-p, delta - 1, 1), '[v:val, "A"]')
+			\+ map(range(delta + p, delta + 1, -1), '[v:val, "C"]')
+			\+ [[delta, "B"]]
+			if fp[k - 1 + offset] < fp[k + 1 + offset]
+				let x = fp[k + 1 + offset]
+				let pp = (r == 'A') ? p - 1 : p
+				let pk = k + 1
+				let dir = '+'
+			else
+				let x = fp[k - 1 + offset] + 1
+				let pp = (r == 'C') ? p - 1 : p
+				let pk = k - 1
+				let dir = '-'
+			endif
+			let y = x - k
+			while x < M && y < N && s1[x] ==# s2[y]
+				let x += 1
+				let y += 1
+				let dir .= '='
+			endwhile
+			let fp[k + offset] = x
+			" add [dir, pp, pk] for p and k
+			let dtree[p][p + k] = [dir, pp, pk]
 		endfor
-		for k in range(delta + s:p, delta + 1, -1)
-			let s:fp[k + s:offset] = s:Snake(k, 'C')
-		endfor
-		let k = delta | let s:fp[k + s:offset] = s:Snake(k, 'B')
 		" find the goal?
-		if s:fp[delta + s:offset] == s:M
+		if fp[delta + offset] == M
 			break
 		endif
-		let s:p += 1
+		let p += 1
 	endwhile
 
 	" create a sequence of direction back from last p and k
 	let ds = ''
-	while s:p >= 0 && s:p + k >= 0
-		let ds = s:dtree[s:p][s:p + k][0] . ds
-		let [s:p, k] = s:dtree[s:p][s:p + k][1:2]
+	while p >= 0 && p + k >= 0
+		let ds = dtree[p][p + k][0] . ds
+		let [p, k] = dtree[p][p + k][1:2]
 	endwhile
 
 	" trace the direction starting from [0, 0]
@@ -219,46 +241,23 @@ function! s:TraceDiffCharONP(s1, s2)
 	let j = 0
 	for dir in split(ds[1:], '\zs')
 		if dir == '-'
-			let char = s:s1[i]
+			let char = s1[i]
 			let i += 1
 		elseif dir == '+'
-			let char = s:s2[j]
+			let char = s2[j]
 			let j += 1
 		elseif dir == '='
-			let char = s:s1[i]
+			let char = s1[i]
 			let i += 1
 			let j += 1
-		endif
-		if rev == 1	" reverse the operation
-			let dir = tr(dir, "+-", "-+")
 		endif
 		call add(d_c, [dir, char])
 	endfor
+	if rev == 1		" reverse the operation
+		call map(d_c, '[tr(v:val[0], "+-", "-+"), v:val[1]]')  
+	endif
 
 	return d_c
-endfunction
-
-function! s:Snake(k, range)
-	if s:fp[a:k - 1 + s:offset] + 1 <= s:fp[a:k + 1 + s:offset]
-		let x = s:fp[a:k + 1 + s:offset]
-		let pp = (a:range == 'A') ? s:p - 1 : s:p
-		let pk = a:k + 1
-		let dir = '+'
-	else
-		let x = s:fp[a:k - 1 + s:offset] + 1
-		let pp = (a:range == 'C') ? s:p - 1 : s:p
-		let pk = a:k - 1
-		let dir = '-'
-	endif
-	let y = x - a:k
-	while x < s:M && y < s:N && s:s1[x] ==# s:s2[y]
-		let x += 1
-		let y += 1
-		let dir .= '='
-	endwhile
-	" add [dir, pp, pk] for p and k
-	let s:dtree[s:p][s:p + a:k] = [dir, pp, pk]
-	return x
 endfunction
 
 " O(ND) Difference algorithm
