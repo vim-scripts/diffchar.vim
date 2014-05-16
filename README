@@ -1,5 +1,9 @@
 This is a mirror of http://www.vim.org/scripts/script.php?script_id=4932
 
+Update : 3.0
+* Implemented word by word differences. A g:DiffUnit variable is a type of a difference unit. Its default is 'Char', which will trace character by character as before. 'Word1' will split into \w\+ words and any \W single characters. And 'Word2' will separate the units at the \s\+ space boundaries.
+* Improved the performance around 10%.
+
 Update : 2.1
 * Coding changes in the O(NP) function for readability.
 
