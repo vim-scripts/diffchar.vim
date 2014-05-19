@@ -1,5 +1,17 @@
 This is a mirror of http://www.vim.org/scripts/script.php?script_id=4932
 
+Update : 3.1
+* Enhanced to show/reset/toggle DiffChar highlightings on individual line by line.
+* Implemented the window layout handling.
+  - the DiffChar'ed windows will remain the highlightings even if the window position is rotated/replaced/moved and another new window opens.
+  - if either DiffChar'ed window is closed, reset all the DiffChar highlightings on another window.
+* Removed limitations:
+  - when more than 2 windows exist, current and next (wincmd w) windows will be selected.
+  - if the specified numbers of lines are different in both windows, ignore the redundant lines and continue to compare the text on the same lines.
+  - RDChar sample command has a range attribute (e.g. %RDChar).
+* Fixed defects:
+  - reset just DiffChar highlightings only and remain others.
+
 Update : 3.0
 * Implemented word by word differences. A g:DiffUnit variable is a type of a difference unit. Its default is 'Char', which will trace character by character as before. 'Word1' will split into \w\+ words and any \W single characters. And 'Word2' will separate the units at the \s\+ space boundaries.
 * Improved the performance around 10%.
@@ -22,14 +34,16 @@ For example, diff command shows: (<|DiffText area|>)
 then this script will narrow down the DiffText area: 
 
      (file A) The <|swift brown|> fox jumped over the <|lazy|> dog. 
-     (file B) The <|lazy|> fox jumped over the<| swift|> <|brown|> dog. 
+     (file B) The <|lazy|> fox jumped over the <|swift brown|> dog. 
 
 Sample commands:
 :[range]SDChar (Highlight DiffChar for [range])
-:RDChar (Reset DiffChar)
+:[range]RDChar (Reset DiffChar for [range])
 
 Sample keymaps:
 <F7> (for all lines and toggle the DiffChar highlight)
 <F8> (for current line and toggle the DiffChar highlight)
 
-Note that this script assumes that there have been only 2 windows and both windows have same number of lines displayed. And try to compare the text on the same line in both windows. If DiffAdd and/or DiffDelete lines exist, it might work incorrectly.
+Note that this script tries to compare the text on the same line in both windows. If DiffAdd and/or DiffDelete lines exist, it might work incorrectly.
+
+This script has been always positively supporting mulltibyte characters.

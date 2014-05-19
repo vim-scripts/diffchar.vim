@@ -1,5 +1,22 @@
 " diffchar.vim - Highlight the differences, based on characters and words
 "
+" Update : 3.1
+" * Enhanced to show/reset/toggle DiffChar highlightings on individual line
+"   by line.
+" * Implemented the window layout handling.
+"   - the DiffChar'ed windows will remain the highlightings even if the
+"     window position is rotated/replaced/moved and another new window opens.
+"   - if either DiffChar'ed window is closed, reset all the DiffChar
+"     highlightings on another window.
+" * Removed limitations:
+"   - when more than 2 windows exist, current and next (wincmd w) windows
+"     will be selected.
+"   - if the specified numbers of lines are different in both windows, ignore
+"     the redundant lines and continue to compare the text on the same lines.
+"   - RDChar sample command has a range attribute (e.g. %RDChar).
+" * Fixed defects:
+"   - reset just DiffChar highlightings only and remain others.
+"
 " Update : 3.0
 " * Implemented word by word differences. A g:DiffUnit variable is a type of
 "   a difference unit. Its default is 'Char', which will trace character
@@ -33,30 +50,30 @@
 " then this script will narrow down the DiffText area:
 "
 "      (file A) The <|swift brown|> fox jumped over the <|lazy|> dog.
-"      (file B) The <|lazy|> fox jumped over the<| swift|> <|brown|> dog.
+"      (file B) The <|lazy|> fox jumped over the <|swift brown|> dog.
 "
 " Sample commands:
 " :[range]SDChar (Highlight DiffChar for [range])
-" :RDChar (Reset DiffChar)
+" :[range]RDChar (Reset DiffChar for [range])
 "
 " Sample keymaps:
 " <F7> (for all lines and toggle the DiffChar highlight)
 " <F8> (for current line and toggle the DiffChar highlight)
 "
-" Note that this script assumes that there have been only 2 windows and
-" both windows have same number of lines displayed. And try to compare
-" the text on the same line in both windows. If DiffAdd and/or DiffDelete
-" lines exist, it might work incorrectly.
+" Note that this script tries to compare the text on the same line in both
+" windows. If DiffAdd and/or DiffDelete lines exist, it might work incorrectly.
+"
+" This script has been always positively supporting mulltibyte characters.
 "
 " Author: Rick Howe
-" Last Change: 2014/5/16
+" Last Change: 2014/5/19
 " Created:
 " Requires:
-" Version: 3.0
+" Version: 3.1
 
 " Sample commands
 command! -range SDChar :call s:ShowDiffChar(<line1>, <line2>)
-command! RDChar :call s:ResetDiffChar()
+command! -range RDChar :call s:ResetDiffChar(<line1>, <line2>)
 
 " Sample keymaps
 map <F7> :call <SID>ToggleDiffChar(1, line('$'))<CR>
@@ -72,42 +89,77 @@ let g:DiffAlgorithm = 'ONP'
 " let g:DiffAlgorithm = 'OND'
 " let g:DiffAlgorithm = 'Basic'
 
-let s:diffchar = 0
+" Line and its match ids record, {'line#': [mid1, mid2, ...], ...}
+let s:mid1 = {}
+let s:mid2 = {}
+let s:buf1 = 0
+let s:buf2 = 0
+
 function! s:ToggleDiffChar(...)
 	if a:0 == 1 | let sline = a:1 | let eline = a:1
 	elseif a:0 == 2 | let sline = a:1 | let eline = a:2
 	else | return
 	endif
-	if s:diffchar == 0
-		if s:ShowDiffChar(sline, eline) != -1
-			let s:diffchar = 1
+	for l in range(sline, eline)
+		if has_key(s:mid1, l) || has_key(s:mid2, l)
+			call s:ResetDiffChar(sline, eline)
+			return
 		endif
-	else
-		call s:ResetDiffChar()
-		let s:diffchar = 0
-	endif
+	endfor
+	call s:ShowDiffChar(sline, eline)
 endfunction
 
-function! s:ResetDiffChar()
-	let w = winnr()
-	windo call clearmatches()
-	exec w . 'wincmd w'
+function! s:ResetDiffChar(sline, eline)
+	let cbuf = winbufnr(0)
+	if cbuf != s:buf1 && cbuf != s:buf2 | return | endif
+	for i in (cbuf == s:buf1) ? [2, 1] : [1, 2]
+		exec bufwinnr(s:buf{i}) . 'wincmd w'
+		for l in range(a:sline, a:eline)
+			if has_key(s:mid{i}, l)
+				for id in s:mid{i}[l]
+					call matchdelete(id)
+				endfor
+				unlet s:mid{i}[l]
+			endif
+		endfor
+		if empty(s:mid{i})
+			exec 'au! BufWinLeave <buffer=' . s:buf{i} . '>'
+		endif
+	endfor
 endfunction
 
 function! s:ShowDiffChar(sline, eline)
-	if a:sline > a:eline | return -1 | endif
-	if winnr('$') != 2
-		echo "More/less than 2 Windows!" | return -1
+	" get buffer id only when there is no mid in both windows
+	if empty(s:mid1) && empty(s:mid2)
+		let wnum = winnr('$')
+		if wnum == 1
+			echo "Need another window!" | return
+		else
+			" select current and next (wincmd w) window's buffers
+			let s:buf1 = winbufnr(0)
+			let s:buf2 = winbufnr(winnr() % wnum + 1)
+			" set event for new buffers
+			exec 'au BufWinLeave <buffer=' . s:buf1 . '> call s:ResetDiffChar(1, line("$"))'
+			exec 'au BufWinLeave <buffer=' . s:buf2 . '> call s:ResetDiffChar(1, line("$"))'
+		endif
 	endif
 
 	" get lines (sline, eline) of both windows
-	let t1 = getline(a:sline, a:eline)
-	let n1 = len(t1)
-	wincmd w
-	let t2 = getline(a:sline, a:eline)
-	let n2 = len(t2)
-	wincmd w
-	if n1 != n2 | echo "Not same # of lines!" | return -1 | endif
+	let cbuf = winbufnr(0)
+	if cbuf != s:buf1 && cbuf != s:buf2 | return | endif
+	for i in (cbuf == s:buf1) ? [2, 1] : [1, 2]
+		exec bufwinnr(s:buf{i}) . 'wincmd w'
+		let t{i} = getline(a:sline, a:eline)
+		let n{i} = len(t{i})
+	endfor
+
+	" remove redundant lines in either window
+	if n1 == 0 || n2 == 0 | return | endif
+	if n1 > n2
+		unlet t1[n2 - n1 :] | let n1 = n2
+	elseif n1 < n2
+		unlet t2[n1 - n2 :] | let n2 = n1
+	endif
 
 	" set a split pattern according to the difference unit type
 	if g:DiffUnit == 'Char'		" any single character
@@ -117,72 +169,75 @@ function! s:ShowDiffChar(sline, eline)
 	elseif g:DiffUnit == 'Word2'	" non-space and space words
 		let sptn = '\(\s\+\|\S\+\)\zs'
 	else
-		echo "Not a valid difference unit type!"
-		return -1
+		echo "Not a valid difference unit type!" | return
 	endif
 
-	let lc1 = []		" a list of different lines and columns for t1
-	let lc2 = []		" a list of different lines and columns for t2
+	let lc1 = {}	" a list of different lines and columns for t1
+	let lc2 = {}	" a list of different lines and columns for t2
 
 	" compare each line and trace difference units
 	for n in range(n1)
-		if t1[n] !=# t2[n]
-			" split each line to the difference units
-			let u1 = split(t1[n], sptn)
-			let u2 = split(t2[n], sptn)
-
-			" find first/last same units and get them out to trace
-			let ns = (len(u1) < len(u2)) ? len(u1) : len(u2)
-			let fu = 0
-			while fu < ns && u1[fu] ==# u2[fu]
-				let fu += 1
-			endwhile
-			let ns -= fu
-			let lu = -1
-			while lu >= -ns && u1[lu] ==# u2[lu]
-				let lu -= 1
-			endwhile
-			let fsu = (fu == 0) ? [] : u1[:fu - 1]	" 1st same units
-			let u1d = u1[fu : lu]	" actual difference units in u1
-			let u2d = u2[fu : lu]	" actual difference units in u2
-
-			" trace the actual diffference units
-			let c1 = []
-			let c2 = []
-			let l1 = len(join(fsu, ''))
-			let l2 = l1
-			for [edit, unit]
-				\in s:TraceDiffChar{g:DiffAlgorithm}(u1d, u2d)
-				let m = len(unit)
-				if edit == '-'
-					let c1 += range(l1 + 1, l1 + m)
-					let l1 += m
-				elseif edit == '+'
-					let c2 += range(l2 + 1, l2 + m)
-					let l2 += m
-				elseif edit == '='
-					let l1 += m
-					let l2 += m
-				endif
-			endfor
-
-			" add different lines and columns to the list
-			call add(lc1, [a:sline + n, c1])
-			call add(lc2, [a:sline + n, c2])
+		if t1[n] ==# t2[n]
+			\|| has_key(s:mid1, a:sline + n)
+			\|| has_key(s:mid2, a:sline + n)
+			continue
 		endif
+
+		" split each line to the difference units
+		let u1 = split(t1[n], sptn)
+		let u2 = split(t2[n], sptn)
+
+		" find first/last same units and get them out to trace
+		let ns = (len(u1) < len(u2)) ? len(u1) : len(u2)
+		let fu = 0
+		while fu < ns && u1[fu] ==# u2[fu]
+			let fu += 1
+		endwhile
+		let ns -= fu
+		let lu = -1
+		while lu >= -ns && u1[lu] ==# u2[lu]
+			let lu -= 1
+		endwhile
+		let fsu = (fu == 0) ? [] : u1[:fu - 1]	" 1st same units
+		let u1d = u1[fu : lu]	" actual difference units in u1
+		let u2d = u2[fu : lu]	" actual difference units in u2
+
+		" trace the actual diffference units
+		let c1 = []
+		let c2 = []
+		let l1 = len(join(fsu, ''))
+		let l2 = l1
+		for [edit, unit] in s:TraceDiffChar{g:DiffAlgorithm}(u1d, u2d)
+			let m = len(unit)
+			if edit == '-'
+				let c1 += range(l1 + 1, l1 + m)
+				let l1 += m
+			elseif edit == '+'
+				let c2 += range(l2 + 1, l2 + m)
+				let l2 += m
+			elseif edit == '='
+				let l1 += m
+				let l2 += m
+			endif
+		endfor
+
+		" add different lines and columns to the list
+		let lc1[a:sline + n] = c1
+		let lc2[a:sline + n] = c2
 	endfor
 
-	" highlight different lines and columns
-	call s:HighlightDiffChar(lc1)
-	wincmd w
-	call s:HighlightDiffChar(lc2)
-	wincmd w
+	" highlight lines and columns and add to the mid record
+	for i in (cbuf == s:buf1) ? [2, 1] : [1, 2]
+		exec bufwinnr(s:buf{i}) . 'wincmd w'
+		call extend(s:mid{i}, s:HighlightDiffChar(lc{i}))
+	endfor
 endfunction
 
 function! s:HighlightDiffChar(lncol)
-	for [line, col] in a:lncol
+	let mid = {}
+	for [line, col] in items(a:lncol)
 		let dl = '\%' . line . 'l'
-		call matchadd('DiffChange', dl . '.')
+		let id = [matchadd('DiffChange', dl . '.')]
 		if !empty(col)
 			let dc = string(col[0])
 			for i in range(1, len(col) - 1)
@@ -193,9 +248,11 @@ function! s:HighlightDiffChar(lncol)
 			let dc = substitute(dc, '<\zs\d\+\zec', '\=submatch(0) + 1', 'g')
 			let dc = tr(dc, '-', '#')
 			let dc = substitute(dc, '\%(^\|#\)\zs\d\+\ze\%(#\|$\)', '\\%&c', 'g')
-			call matchadd('DiffText', dl . '\%(' . substitute(dc, '#', '\\|', 'g') . '\)')
+			let id += [matchadd('DiffText', dl . '\%(' . substitute(dc, '#', '\\|', 'g') . '\)')]
 		endif
+		let mid[line] = id
 	endfor
+	return mid
 endfunction
 
 " O(NP) Difference algorithm
