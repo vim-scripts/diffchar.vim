@@ -1,5 +1,10 @@
 " diffchar.vim - Highlight the differences, based on characters and words
 "
+" Update : 3.2
+" * Enhanced to follow diff mode without any limitations. Compare between
+"   the corresponding DiffChange lines on both windows and properly handle
+"   DiffAdd and DiffDelete lines.
+"
 " Update : 3.1
 " * Enhanced to show/reset/toggle DiffChar highlightings on individual line
 "   by line.
@@ -19,9 +24,9 @@
 "
 " Update : 3.0
 " * Implemented word by word differences. A g:DiffUnit variable is a type of
-"   a difference unit. Its default is 'Char', which will trace character
-"   by character as before. 'Word1' will split into \w\+ words and
-"   any \W single characters. And 'Word2' will separate the units at the
+"   a difference unit. Its default is "Char", which will trace character
+"   by character as before. "Word1" will split into \w\+ words and
+"   any \W single characters. And "Word2" will separate the units at the
 "   \s\+ space boundaries.
 " * Improved the performance around 10%.
 "
@@ -60,16 +65,21 @@
 " <F7> (for all lines and toggle the DiffChar highlight)
 " <F8> (for current line and toggle the DiffChar highlight)
 "
-" Note that this script tries to compare the text on the same line in both
-" windows. If DiffAdd and/or DiffDelete lines exist, it might work incorrectly.
-"
 " This script has been always positively supporting mulltibyte characters.
 "
 " Author: Rick Howe
-" Last Change: 2014/5/19
+" Last Change: 2014/5/26
 " Created:
 " Requires:
-" Version: 3.1
+" Version: 3.2
+
+if exists("g:loaded_diffchar")
+	finish
+endif
+let g:loaded_diffchar = 1
+
+let s:save_cpo = &cpo
+set cpo&vim
 
 " Sample commands
 command! -range SDChar :call s:ShowDiffChar(<line1>, <line2>)
@@ -80,20 +90,57 @@ map <F7> :call <SID>ToggleDiffChar(1, line('$'))<CR>
 map <F8> :call <SID>ToggleDiffChar(line('.'))<CR>
 
 " Set a difference unit type
-let g:DiffUnit = 'Char'		" any single character
-" let g:DiffUnit = 'Word1'	" \w\+ word and any \W single character
-" let g:DiffUnit = 'Word2'	" non-space and space words
+let g:DiffUnit = "Char"		" any single character
+" let g:DiffUnit = "Word1"	" \w\+ word and any \W single character
+" let g:DiffUnit = "Word2"	" non-space and space words
 
 " Set a difference algorithm
-let g:DiffAlgorithm = 'ONP'
-" let g:DiffAlgorithm = 'OND'
-" let g:DiffAlgorithm = 'Basic'
+let g:DiffAlgorithm = "ONP"
+" let g:DiffAlgorithm = "OND"
+" let g:DiffAlgorithm = "Basic"
 
-" Line and its match ids record, {'line#': [mid1, mid2, ...], ...}
-let s:mid1 = {}
-let s:mid2 = {}
-let s:buf1 = 0
-let s:buf2 = 0
+function! s:InitializeDiffChar()
+	" select current and next (wincmd w) window's buffers
+	let s:buf1 = winbufnr(0)
+	let s:buf2 = winbufnr(winnr() % winnr('$') + 1)
+
+	" find corresponding DiffChange/DiffText highlight lines on
+	" both diff mode buffers and set diff mode for selected buffers
+	let s:dmode = 1
+	let dcID = hlID("DiffChange")
+	let dtID = hlID("DiffText")
+	for n in [2, 1]
+		exec bufwinnr(s:buf{n}) . "wincmd w"
+		if &diff
+			let s:dcl{n} = []
+			for l in range(1, line('$'))
+				let id = diff_hlID(l, 1)
+				if id == dcID || id == dtID
+					let s:dcl{n} += [l]
+				endif
+			endfor
+		endif
+		let s:dmode = and(s:dmode, &diff)
+	endfor
+
+	" set line and its highlight id record
+	let s:mid1 = {}
+	let s:mid2 = {}
+
+	" set a split pattern according to the difference unit type
+	if g:DiffUnit == "Char"		" any single character
+		let s:sptn = '\zs'
+	elseif g:DiffUnit == "Word1"	" \w\+ word and any \W character
+		let s:sptn = '\(\w\+\|\W\)\zs'
+	elseif g:DiffUnit == "Word2"	" non-space and space words
+		let s:sptn = '\(\s\+\|\S\+\)\zs'
+	else
+		let s:sptn = '\zs'
+		echo 'Not a valid difference unit type. Use "Char" instead.'
+	endif
+endfunction
+
+call s:InitializeDiffChar()
 
 function! s:ToggleDiffChar(...)
 	if a:0 == 1 | let sline = a:1 | let eline = a:1
@@ -112,64 +159,60 @@ endfunction
 function! s:ResetDiffChar(sline, eline)
 	let cbuf = winbufnr(0)
 	if cbuf != s:buf1 && cbuf != s:buf2 | return | endif
-	for i in (cbuf == s:buf1) ? [2, 1] : [1, 2]
-		exec bufwinnr(s:buf{i}) . 'wincmd w'
-		for l in range(a:sline, a:eline)
-			if has_key(s:mid{i}, l)
-				for id in s:mid{i}[l]
-					call matchdelete(id)
-				endfor
-				unlet s:mid{i}[l]
-			endif
+
+	" create a DiffChar line list between sline/eline
+	if s:dmode		" diff mode
+		let [d1, d2] = s:GetDiffModeLines(a:sline, a:eline)
+	else			" non-diff mode
+		for n in [1, 2]
+			let d{n} = range(a:sline, a:eline)
 		endfor
-		if empty(s:mid{i})
-			exec 'au! BufWinLeave <buffer=' . s:buf{i} . '>'
+	endif
+
+	for n in (cbuf == s:buf1) ? [2, 1] : [1, 2]
+		exec bufwinnr(s:buf{n}) . "wincmd w"
+		call s:ClearDiffChar(n, d{n})
+		if empty(s:mid{n})
+			exec "au! BufWinLeave <buffer=" . s:buf{n} . ">"
 		endif
 	endfor
 endfunction
 
 function! s:ShowDiffChar(sline, eline)
-	" get buffer id only when there is no mid in both windows
+	if winnr('$') == 1 | echo "Need another window!" | return | endif
+
+	" initialize when there is no DiffChar highlightings in both windows
 	if empty(s:mid1) && empty(s:mid2)
-		let wnum = winnr('$')
-		if wnum == 1
-			echo "Need another window!" | return
-		else
-			" select current and next (wincmd w) window's buffers
-			let s:buf1 = winbufnr(0)
-			let s:buf2 = winbufnr(winnr() % wnum + 1)
-			" set event for new buffers
-			exec 'au BufWinLeave <buffer=' . s:buf1 . '> call s:ResetDiffChar(1, line("$"))'
-			exec 'au BufWinLeave <buffer=' . s:buf2 . '> call s:ResetDiffChar(1, line("$"))'
-		endif
+		call s:InitializeDiffChar()
 	endif
 
-	" get lines (sline, eline) of both windows
 	let cbuf = winbufnr(0)
 	if cbuf != s:buf1 && cbuf != s:buf2 | return | endif
-	for i in (cbuf == s:buf1) ? [2, 1] : [1, 2]
-		exec bufwinnr(s:buf{i}) . 'wincmd w'
-		let t{i} = getline(a:sline, a:eline)
-		let n{i} = len(t{i})
-	endfor
+
+	" create a DiffChar line list between sline/eline and get those lines
+	if s:dmode		" diff mode
+		let [d1, d2] = s:GetDiffModeLines(a:sline, a:eline)
+		for n in [1, 2]
+			let t{n} = []
+			for d in d{n}
+				let t{n} += getbufline(s:buf{n}, d)
+			endfor
+			let n{n} = len(t{n})
+		endfor
+	else			" non-diff mode
+		for n in [1, 2]
+			let t{n} = getbufline(s:buf{n}, a:sline, a:eline)
+			let n{n} = len(t{n})
+			let d{n} = range(a:sline, a:sline + n{n} - 1)
+		endfor
+	endif
 
 	" remove redundant lines in either window
 	if n1 == 0 || n2 == 0 | return | endif
 	if n1 > n2
-		unlet t1[n2 - n1 :] | let n1 = n2
+		unlet t1[n2 - n1 :] | unlet d1[n2 - n1 :] | let n1 = n2
 	elseif n1 < n2
-		unlet t2[n1 - n2 :] | let n2 = n1
-	endif
-
-	" set a split pattern according to the difference unit type
-	if g:DiffUnit == 'Char'		" any single character
-		let sptn = '\zs'
-	elseif g:DiffUnit == 'Word1'	" \w\+ word and any \W single character
-		let sptn = '\(\w\+\|\W\)\zs'
-	elseif g:DiffUnit == 'Word2'	" non-space and space words
-		let sptn = '\(\s\+\|\S\+\)\zs'
-	else
-		echo "Not a valid difference unit type!" | return
+		unlet t2[n1 - n2 :] | unlet d2[n1 - n2 :] | let n2 = n1
 	endif
 
 	let lc1 = {}	" a list of different lines and columns for t1
@@ -177,18 +220,14 @@ function! s:ShowDiffChar(sline, eline)
 
 	" compare each line and trace difference units
 	for n in range(n1)
-		if t1[n] ==# t2[n]
-			\|| has_key(s:mid1, a:sline + n)
-			\|| has_key(s:mid2, a:sline + n)
-			continue
-		endif
+		if t1[n] ==# t2[n] | continue | endif
 
 		" split each line to the difference units
-		let u1 = split(t1[n], sptn)
-		let u2 = split(t2[n], sptn)
+		let u1 = split(t1[n], s:sptn)
+		let u2 = split(t2[n], s:sptn)
 
 		" find first/last same units and get them out to trace
-		let ns = (len(u1) < len(u2)) ? len(u1) : len(u2)
+		let ns = min([len(u1), len(u2)])
 		let fu = 0
 		while fu < ns && u1[fu] ==# u2[fu]
 			let fu += 1
@@ -209,50 +248,85 @@ function! s:ShowDiffChar(sline, eline)
 		let l2 = l1
 		for [edit, unit] in s:TraceDiffChar{g:DiffAlgorithm}(u1d, u2d)
 			let m = len(unit)
-			if edit == '-'
+			if edit == '='
+				let l1 += m
+				let l2 += m
+			elseif edit == '-'
 				let c1 += range(l1 + 1, l1 + m)
 				let l1 += m
 			elseif edit == '+'
 				let c2 += range(l2 + 1, l2 + m)
 				let l2 += m
-			elseif edit == '='
-				let l1 += m
-				let l2 += m
 			endif
 		endfor
 
 		" add different lines and columns to the list
-		let lc1[a:sline + n] = c1
-		let lc2[a:sline + n] = c2
+		let lc1[d1[n]] = c1
+		let lc2[d2[n]] = c2
 	endfor
 
-	" highlight lines and columns and add to the mid record
-	for i in (cbuf == s:buf1) ? [2, 1] : [1, 2]
-		exec bufwinnr(s:buf{i}) . 'wincmd w'
-		call extend(s:mid{i}, s:HighlightDiffChar(lc{i}))
+	" highlight lines and columns and add it to the mid record
+	for n in (cbuf == s:buf1) ? [2, 1] : [1, 2]
+		exec bufwinnr(s:buf{n}) . "wincmd w"
+		call s:ClearDiffChar(n, keys(lc{n}))
+		call s:HighlightDiffChar(n, lc{n})
+		if !empty(s:mid{n}) &&
+			\!exists("#BufWinLeave#<buffer=" . s:buf{n} . ">")
+			exec "au BufWinLeave <buffer=" . s:buf{n} . "> call s:ResetDiffChar(1, line('$'))"
+		endif
 	endfor
 endfunction
 
-function! s:HighlightDiffChar(lncol)
-	let mid = {}
+function! s:GetDiffModeLines(sline, eline)
+	" in diff mode, need to compare the different line between buffers
+	" if current buffer is s:buf1, narrow sline <= s:dcl1 <= eline
+	" and get the corresponding lines from s:dcl2
+	let d1 = copy(s:dcl1) | let d2 = copy(s:dcl2)
+	let cbuf = winbufnr(0)
+	if cbuf == s:buf1 | let i = 1 | let j = 2
+	elseif cbuf == s:buf2 | let i = 2 | let j = 1
+	endif
+	for n in range(len(d{i}))
+		if d{i}[n] < a:sline || a:eline < d{i}[n]
+			let d{i}[n] = -1
+			let d{j}[n] = -1
+		endif
+	endfor
+	for n in [1, 2]
+		call filter(d{n}, 'v:val != -1')
+	endfor
+	return [d1, d2]
+endfunction
+
+function! s:ClearDiffChar(n, lines)
+	for l in a:lines
+		if has_key(s:mid{a:n}, l)
+			for id in s:mid{a:n}[l]
+				call matchdelete(id)
+			endfor
+			unlet s:mid{a:n}[l]
+		endif
+	endfor
+endfunction
+
+function! s:HighlightDiffChar(n, lncol)
 	for [line, col] in items(a:lncol)
 		let dl = '\%' . line . 'l'
-		let id = [matchadd('DiffChange', dl . '.')]
+		let id = [matchadd("DiffChange", dl . '.')]
 		if !empty(col)
 			let dc = string(col[0])
-			for i in range(1, len(col) - 1)
-				let dc .= (col[i - 1] + 1 == col[i] ?  '-' : '#') . string(col[i])
+			for c in range(1, len(col) - 1)
+				let dc .= (col[c - 1] + 1 == col[c] ?  '-' : '#') . string(col[c])
 			endfor
 			let dc = substitute(dc, '\%(^\|#\)\zs\(\d\+\)-\%(\d\+-\)\+\(\d\+\)\ze\%(#\|$\)', '\\%>\1c\\%<\2c', 'g')
 			let dc = substitute(dc, '>\zs\d\+\zec', '\=submatch(0) - 1', 'g')
 			let dc = substitute(dc, '<\zs\d\+\zec', '\=submatch(0) + 1', 'g')
 			let dc = tr(dc, '-', '#')
 			let dc = substitute(dc, '\%(^\|#\)\zs\d\+\ze\%(#\|$\)', '\\%&c', 'g')
-			let id += [matchadd('DiffText', dl . '\%(' . substitute(dc, '#', '\\|', 'g') . '\)')]
+			let id += [matchadd("DiffText", dl . '\%(' . substitute(dc, '#', '\\|', 'g') . '\)')]
 		endif
-		let mid[line] = id
+		let s:mid{a:n}[line] = id
 	endfor
-	return mid
 endfunction
 
 " O(NP) Difference algorithm
@@ -280,7 +354,7 @@ function! s:TraceDiffCharONP(u1, u2)
 	let p = -1
 	while fp[delta + offset] != M
 		let p += 1
-		call add(etree, repeat([['', 0, 0]], p * 2 + delta + 1))
+		let etree += [repeat([['', 0, 0]], p * 2 + delta + 1)]
 		for [k, r] in map(range(-p, delta - 1, 1), '[v:val, "A"]')
 			\+ map(range(delta + p, delta + 1, -1), '[v:val, "C"]')
 			\+ [[delta, "B"]]
@@ -322,15 +396,15 @@ function! s:TraceDiffCharONP(u1, u2)
 	let j = 0
 	for n in range(len(eseq))
 		let edit = eseq[n]
-		if edit == '-'
+		if edit == '='
+			let unit = u1[i]
+			let i += 1
+			let j += 1
+		elseif edit == '-'
 			let unit = u1[i]
 			let i += 1
 		elseif edit == '+'
 			let unit = u2[j]
-			let j += 1
-		elseif edit == '='
-			let unit = u1[i]
-			let i += 1
 			let j += 1
 		endif
 		let ses[n] = [edit, unit]
@@ -354,7 +428,7 @@ function! s:TraceDiffCharOND(u1, u2)
 	let found = 0
 
 	for D in range(offset + 1)
-		call add(etree, [])	" add a list for each D
+		let etree += [[]]	" add a list for each D
 		for k in range(-D, D, 2)
 			if k == -D || k != D && V[k - 1 + offset] < V[k + 1 + offset]
 				let x = V[k + 1 + offset]
@@ -373,7 +447,7 @@ function! s:TraceDiffCharOND(u1, u2)
 			endwhile
 			let V[k + offset] = x
 			" add [ed, pk] of k for [-D], [-D+2], ..., [D-2], [D]
-			call add(etree[D], [ed, (pk + D - 1)/2])
+			let etree[D] += [[ed, (pk + D - 1)/2]]
 			" find the goal?
 			if x >= n1 && y >= n2 | let found = 1 | break | endif
 		endfor
@@ -396,15 +470,15 @@ function! s:TraceDiffCharOND(u1, u2)
 	let j = 0
 	for n in range(len(eseq))
 		let edit = eseq[n]
-		if edit == '-'
+		if edit == '='
+			let unit = a:u1[i]
+			let i += 1
+			let j += 1
+		elseif edit == '-'
 			let unit = a:u1[i]
 			let i += 1
 		elseif edit == '+'
 			let unit = a:u2[j]
-			let j += 1
-		elseif edit == '='
-			let unit = a:u1[i]
-			let i += 1
 			let j += 1
 		endif
 		let ses[n] = [edit, unit]
@@ -422,7 +496,7 @@ function! s:TraceDiffCharBasic(u1, u2)
 	" initialize an edit graph [next edit, # of steps to goal]
 	let egraph = []
 	for i in range(n1 + 1)
-		call add(egraph, repeat([['', 0]], n2 + 1))
+		let egraph += [repeat([['', 0]], n2 + 1)]
 	endfor
 
 	" assign values in egraph[] based on u1 and u2
@@ -452,21 +526,24 @@ function! s:TraceDiffCharBasic(u1, u2)
 	let j = 0
 	while 1
 		let edit = egraph[i][j][0]
-		if edit == '-'
+		if edit == '='
+			let unit = a:u1[i]
+			let i += 1
+			let j += 1
+		elseif edit == '-'
 			let unit = a:u1[i]
 			let i += 1
 		elseif edit == '+'
 			let unit = a:u2[j]
 			let j += 1
-		elseif edit == '='
-			let unit = a:u1[i]
-			let i += 1
-			let j += 1
 		elseif edit == '*'
 			break
 		endif
-		call add(ses, [edit, unit])
+		let ses += [[edit, unit]]
 	endwhile
 
 	return ses
 endfunction
+
+let &cpo = s:save_cpo
+unlet s:save_cpo
