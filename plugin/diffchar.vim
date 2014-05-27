@@ -1,5 +1,10 @@
 " diffchar.vim - Highlight the differences, based on characters and words
 "
+" Update : 3.3
+" * Enhanced to jump cursor to the DiffChar highlighting units. Sample keymaps
+"   "]b" and "[b" will move cursor forwards to the next and backwards to the
+"   previous start positions. And "]e" and "[e" will move to the end positions.
+"
 " Update : 3.2
 " * Enhanced to follow diff mode without any limitations. Compare between
 "   the corresponding DiffChange lines on both windows and properly handle
@@ -64,14 +69,18 @@
 " Sample keymaps:
 " <F7> (for all lines and toggle the DiffChar highlight)
 " <F8> (for current line and toggle the DiffChar highlight)
+" [b (jump to the start position of the previous DiffChar unit)
+" ]b (jump to the start position of the next DiffChar unit)
+" [e (jump to the end position of the previous DiffChar unit)
+" ]e (jump to the end position of the next DiffChar unit)
 "
 " This script has been always positively supporting mulltibyte characters.
 "
 " Author: Rick Howe
-" Last Change: 2014/5/26
+" Last Change: 2014/5/27
 " Created:
 " Requires:
-" Version: 3.2
+" Version: 3.3
 
 if exists("g:loaded_diffchar")
 	finish
@@ -86,8 +95,12 @@ command! -range SDChar :call s:ShowDiffChar(<line1>, <line2>)
 command! -range RDChar :call s:ResetDiffChar(<line1>, <line2>)
 
 " Sample keymaps
-map <F7> :call <SID>ToggleDiffChar(1, line('$'))<CR>
-map <F8> :call <SID>ToggleDiffChar(line('.'))<CR>
+nmap <F7> :call <SID>ToggleDiffChar(1, line('$'))<CR>
+nmap <F8> :call <SID>ToggleDiffChar(line('.'))<CR>
+nmap [b :call <SID>MoveCursorDiffChar(0, 1)<CR>
+nmap ]b :call <SID>MoveCursorDiffChar(1, 1)<CR>
+nmap [e :call <SID>MoveCursorDiffChar(0, 0)<CR>
+nmap ]e :call <SID>MoveCursorDiffChar(1, 0)<CR>
 
 " Set a difference unit type
 let g:DiffUnit = "Char"		" any single character
@@ -126,6 +139,10 @@ function! s:InitializeDiffChar()
 	" set line and its highlight id record
 	let s:mid1 = {}
 	let s:mid2 = {}
+
+	" set highlighted lines and columns record
+	let s:hlc1 = {}
+	let s:hlc2 = {}
 
 	" set a split pattern according to the difference unit type
 	if g:DiffUnit == "Char"		" any single character
@@ -305,6 +322,7 @@ function! s:ClearDiffChar(n, lines)
 				call matchdelete(id)
 			endfor
 			unlet s:mid{a:n}[l]
+			unlet s:hlc{a:n}[l]
 		endif
 	endfor
 endfunction
@@ -313,10 +331,19 @@ function! s:HighlightDiffChar(n, lncol)
 	for [line, col] in items(a:lncol)
 		let dl = '\%' . line . 'l'
 		let id = [matchadd("DiffChange", dl . '.')]
+		let hlc = []
 		if !empty(col)
 			let dc = string(col[0])
 			for c in range(1, len(col) - 1)
 				let dc .= (col[c - 1] + 1 == col[c] ?  '-' : '#') . string(col[c])
+			endfor
+			for d in split(substitute(dc, '\%(^\|#\)\d\+-\zs\%(\d\+-\)\+\ze\d\+\%(#\|$\)', '', 'g'), '#')
+				if d =~ '-'
+					let [s, e] = split(d, '-')
+					let hlc += [[eval(s), eval(e)]]
+				else
+					let hlc += [[eval(d), eval(d)]]
+				endif
 			endfor
 			let dc = substitute(dc, '\%(^\|#\)\zs\(\d\+\)-\%(\d\+-\)\+\(\d\+\)\ze\%(#\|$\)', '\\%>\1c\\%<\2c', 'g')
 			let dc = substitute(dc, '>\zs\d\+\zec', '\=submatch(0) - 1', 'g')
@@ -326,7 +353,42 @@ function! s:HighlightDiffChar(n, lncol)
 			let id += [matchadd("DiffText", dl . '\%(' . substitute(dc, '#', '\\|', 'g') . '\)')]
 		endif
 		let s:mid{a:n}[line] = id
+		let s:hlc{a:n}[line] = hlc
 	endfor
+endfunction
+
+function! s:MoveCursorDiffChar(dir, pos)
+	" dir : 1 = forward, else = backward
+	" pos : 1 = start, else = end
+	if empty(s:hlc1) && empty(s:hlc2) | return | endif
+	let cbuf = winbufnr(0)
+	if cbuf != s:buf1 && cbuf != s:buf2 | return | endif
+	let n = (cbuf == s:buf1) ? 1 : 2
+
+	let l = line('.')
+	if has_key(s:hlc{n}, l) && !empty(s:hlc{n}[l])
+		let hlc = map(copy(s:hlc{n}[l]), 'v:val[a:pos ? 0 : 1]')
+		if !a:dir | call map(reverse(hlc), '- v:val') | endif
+		let c = a:dir ? col('.') : - col('.')
+		if !a:pos	" end position workaround for multibyte char
+			let m = len(matchstr(getline('.'), '.', col('.') - 1)) - 1 
+			let c = a:dir ? c + m : c - m
+		endif
+		call filter(hlc, 'c < v:val')
+		if !empty(hlc)
+			call cursor(l, a:dir ? hlc[0] : - hlc[0])
+			return
+		endif
+	endif
+	let l = a:dir ? l + 1 : l - 1
+	while 1 <= l && l <= line('$')
+		if has_key(s:hlc{n}, l) && !empty(s:hlc{n}[l])
+			let hlc = map(copy(s:hlc{n}[l]), 'v:val[a:pos ? 0 : 1]')
+			call cursor(l, hlc[a:dir ? 0 : -1])
+			return
+		endif
+		let l = a:dir ? l + 1 : l - 1
+	endwhile
 endfunction
 
 " O(NP) Difference algorithm
