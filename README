@@ -28,6 +28,9 @@ Sample keymaps:
 
 This script has been always positively supporting mulltibyte characters.
 
+Update : 3.5
+* Fixed defects: DiffChar highlighting units do not override/hide hlsearch.
+
 Update : 3.4
 * Enhanced to support individual DiffChar handling on each tab page. Difference unit and algorithm can also be set page by page using tab page local variables, t:DiffUnit and t:DiffAlgorithm.
 

@@ -32,6 +32,9 @@
 "
 " This script has been always positively supporting mulltibyte characters.
 "
+" Update : 3.5
+" * Fixed defects: DiffChar highlighting units do not override/hide hlsearch.
+"
 " Update : 3.4
 " * Enhanced to support individual DiffChar handling on each tab page.
 "   Difference unit and algorithm can also be set page by page using
@@ -82,10 +85,10 @@
 "   the initial version.
 "
 " Author: Rick Howe
-" Last Change: 2014/5/30
+" Last Change: 2014/6/01
 " Created:
 " Requires:
-" Version: 3.4
+" Version: 3.5
 
 if exists("g:loaded_diffchar")
 	finish
@@ -118,7 +121,7 @@ let g:DiffAlgorithm = "ONP"
 " let g:DiffAlgorithm = "Basic"
 
 function! s:InitializeDiffChar()
-	if len(uniq(tabpagebuflist())) < 2
+	if len(uniq(sort(tabpagebuflist()))) < 2
 		echo "Need more buffers on this page!"
 		return -1
 	endif
@@ -403,7 +406,7 @@ endfunction
 function! s:HighlightDiffChar(n, lncol)
 	for [line, col] in items(a:lncol)
 		let dl = '\%' . line . 'l'
-		let mid = [matchadd("DiffChange", dl . '.')]
+		let mid = [matchadd("DiffChange", dl . '.', 0)]
 		let hlc = []
 		if !empty(col)
 			let dc = col[0]
@@ -424,7 +427,7 @@ function! s:HighlightDiffChar(n, lncol)
 				endif
 				let dc .= '\|'
 			endfor
-			let mid += [matchadd("DiffText", dl . '\%(' . dc[: -3] . '\)')]
+			let mid += [matchadd("DiffText", dl . '\%(' . dc[: -3] . '\)', 0)]
 		endif
 		let t:dchar.mid[a:n][line] = mid
 		let t:dchar.hlc[a:n][line] = hlc
