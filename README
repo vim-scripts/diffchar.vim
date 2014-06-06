@@ -28,6 +28,9 @@ Sample keymaps:
 
 This script has been always positively supporting mulltibyte characters.
 
+Update : 3.6
+* Added two g:DiffUnit (and t:DiffUnit) types. "Word3" will split at the \< or \> boundaries, which can separate based on the character class like CJK, Hiragana, Katakana, Hangul, full width symbols and so on. And "CSV(c)" will split the units by a specified character "c". For example, "CSV(,)" and "CSV(\t)" can be used for comma and tab separated text.
+
 Update : 3.5
 * Fixed defects: DiffChar highlighting units do not override/hide hlsearch.
 

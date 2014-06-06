@@ -32,6 +32,13 @@
 "
 " This script has been always positively supporting mulltibyte characters.
 "
+" Update : 3.6
+" * Added two g:DiffUnit (and t:DiffUnit) types. "Word3" will split at the
+"   \< or \> boundaries, which can separate based on the character class like
+"   CJK, Hiragana, Katakana, Hangul, full width symbols and so on. And "CSV(c)"
+"   will split the units by a specified character "c". For example, "CSV(,)"
+"   and "CSV(\t)" can be used for comma and tab separated text.
+"
 " Update : 3.5
 " * Fixed defects: DiffChar highlighting units do not override/hide hlsearch.
 "
@@ -85,10 +92,10 @@
 "   the initial version.
 "
 " Author: Rick Howe
-" Last Change: 2014/6/01
+" Last Change: 2014/06/06
 " Created:
 " Requires:
-" Version: 3.5
+" Version: 3.6
 
 if exists("g:loaded_diffchar")
 	finish
@@ -99,21 +106,23 @@ let s:save_cpo = &cpo
 set cpo&vim
 
 " Sample commands
-command! -range SDChar :call s:ShowDiffChar(<line1>, <line2>)
-command! -range RDChar :call s:ResetDiffChar(<line1>, <line2>)
+command! -range SDChar call s:ShowDiffChar(<line1>, <line2>)
+command! -range RDChar call s:ResetDiffChar(<line1>, <line2>)
 
 " Sample keymaps
-nmap <F7> :call <SID>ToggleDiffChar(1, line('$'))<CR>
-nmap <F8> :call <SID>ToggleDiffChar(line('.'))<CR>
-nmap [b :call <SID>MoveCursorDiffChar(0, 1)<CR>
-nmap ]b :call <SID>MoveCursorDiffChar(1, 1)<CR>
-nmap [e :call <SID>MoveCursorDiffChar(0, 0)<CR>
-nmap ]e :call <SID>MoveCursorDiffChar(1, 0)<CR>
+nnoremap <silent> <F7> :call <SID>ToggleDiffChar(1, line('$'))<CR>
+nnoremap <silent> <F8> :call <SID>ToggleDiffChar(line('.'))<CR>
+nnoremap <silent> [b :call <SID>MoveCursorDiffChar(0, 1)<CR>
+nnoremap <silent> ]b :call <SID>MoveCursorDiffChar(1, 1)<CR>
+nnoremap <silent> [e :call <SID>MoveCursorDiffChar(0, 0)<CR>
+nnoremap <silent> ]e :call <SID>MoveCursorDiffChar(1, 0)<CR>
 
 " Set a difference unit type
 let g:DiffUnit = "Char"		" any single character
 " let g:DiffUnit = "Word1"	" \w\+ word and any \W single character
 " let g:DiffUnit = "Word2"	" non-space and space words
+" let g:DiffUnit = "Word3"	" \< or \> character class boundaries
+" let g:DiffUnit = "CSV(,)"	" character separated by (,;\t)
 
 " Set a difference algorithm
 let g:DiffAlgorithm = "ONP"
@@ -127,61 +136,66 @@ function! s:InitializeDiffChar()
 	endif
 
 	" define a DiffChar dictionary on this tab page
-	let t:dchar = {}
+	let t:DChar = {}
 
 	" select current and next (wincmd w) window's buffers
-	let t:dchar.buf = {}
+	let t:DChar.buf = {}
 	let cwin = winnr()
-	let t:dchar.buf[1] = winbufnr(cwin)
+	let t:DChar.buf[1] = winbufnr(cwin)
 	let i = 0
 	while 1		" find different buf than buf[1]
-		let t:dchar.buf[2] = winbufnr((cwin + i) % winnr('$') + 1)
-		if t:dchar.buf[1] != t:dchar.buf[2] | break | endif
+		let t:DChar.buf[2] = winbufnr((cwin + i) % winnr('$') + 1)
+		if t:DChar.buf[1] != t:DChar.buf[2] | break | endif
 		let i += 1
 	endwhile
 
 	" find corresponding DiffChange/DiffText highlight lines on both
 	" diff mode buffers and set vim diff mode for selected buffers
-	let t:dchar.vdm = 1
+	let t:DChar.vdm = 1
 	let dcID = hlID("DiffChange")
 	let dtID = hlID("DiffText")
-	let t:dchar.dcl = {}
+	let t:DChar.dcl = {}
 	for n in [1, 2]
-		exec bufwinnr(t:dchar.buf[n]) . "wincmd w"
-		let t:dchar.dcl[n] = []
+		exec bufwinnr(t:DChar.buf[n]) . "wincmd w"
+		let t:DChar.dcl[n] = []
 		if &diff
 			for l in range(1, line('$'))
 				let id = diff_hlID(l, 1)
 				if id == dcID || id == dtID
-					let t:dchar.dcl[n] += [l]
+					let t:DChar.dcl[n] += [l]
 				endif
 			endfor
 		endif
-		let t:dchar.vdm = and(t:dchar.vdm, &diff)
+		let t:DChar.vdm = and(t:DChar.vdm, &diff)
 	endfor
 
 	" set line and its highlight id record
-	let t:dchar.mid = {}
-	let t:dchar.mid[1] = {}
-	let t:dchar.mid[2] = {}
+	let t:DChar.mid = {}
+	let t:DChar.mid[1] = {}
+	let t:DChar.mid[2] = {}
 
 	" set highlighted lines and columns record
-	let t:dchar.hlc = {}
-	let t:dchar.hlc[1] = {}
-	let t:dchar.hlc[2] = {}
+	let t:DChar.hlc = {}
+	let t:DChar.hlc[1] = {}
+	let t:DChar.hlc[2] = {}
 
 	" set a difference unit type on this tab page and set a split pattern
 	if !exists("t:DiffUnit")
 		let t:DiffUnit = g:DiffUnit
 	endif
 	if t:DiffUnit == "Char"		" any single character
-		let t:dchar.spt = '\zs'
+		let t:DChar.spt = '\zs'
 	elseif t:DiffUnit == "Word1"	" \w\+ word and any \W character
-		let t:dchar.spt = '\(\w\+\|\W\)\zs'
+		let t:DChar.spt = '\(\w\+\|\W\)\zs'
 	elseif t:DiffUnit == "Word2"	" non-space and space words
-		let t:dchar.spt = '\(\s\+\|\S\+\)\zs'
+		let t:DChar.spt = '\(\s\+\|\S\+\)\zs'
+	elseif t:DiffUnit == "Word3"	" \< or \> boundaries
+		let t:DChar.spt = '\<\|\>'
+	elseif t:DiffUnit =~ '^CSV(.\+)$'	" character separated
+		let s = substitute(t:DiffUnit, '^CSV(\(.\+\))$', '\1', '')
+		let t:DChar.spt = '\(\([^\'. s . ']\+\)\|\' . s . '\)\zs'
 	else
-		let t:dchar.spt = '\zs'
+		let t:DChar.spt = '\zs'
 		echo 'Not a valid difference unit type. Use "Char" instead.'
 	endif
 
@@ -198,9 +212,9 @@ function! s:ToggleDiffChar(...)
 	elseif a:0 == 2 | let sline = a:1 | let eline = a:2
 	else | return | endif
 
-	if exists("t:dchar")
+	if exists("t:DChar")
 		for l in range(sline, eline)
-			if has_key(t:dchar.mid[1], l) || has_key(t:dchar.mid[2], l)
+			if has_key(t:DChar.mid[1], l) || has_key(t:DChar.mid[2], l)
 				call s:ResetDiffChar(sline, eline)
 				return
 			endif
@@ -210,14 +224,14 @@ function! s:ToggleDiffChar(...)
 endfunction
 
 function! s:ResetDiffChar(sline, eline)
-	if !exists("t:dchar") | return | endif
+	if !exists("t:DChar") | return | endif
 
 	let cwin = winnr()
 	let cbuf = winbufnr(cwin)
-	if cbuf != t:dchar.buf[1] && cbuf != t:dchar.buf[2] | return | endif
+	if cbuf != t:DChar.buf[1] && cbuf != t:DChar.buf[2] | return | endif
 
 	" create a DiffChar line list between sline/eline
-	if t:dchar.vdm		" diff mode
+	if t:DChar.vdm		" diff mode
 		let [d1, d2] = s:GetDiffModeLines(a:sline, a:eline)
 	else			" non-diff mode
 		for n in [1, 2]
@@ -228,47 +242,47 @@ function! s:ResetDiffChar(sline, eline)
 	for n in [1, 2]
 		" a split buf has more than 1 windows
 		for w in range(1, winnr('$'))
-			if winbufnr(w) == t:dchar.buf[n]
+			if winbufnr(w) == t:DChar.buf[n]
 				exec w . "wincmd w"
 				call s:ClearDiffChar(n, d{n})
 			endif
 		endfor
-		if empty(t:dchar.mid[n])
-			exec "au! BufWinLeave <buffer=" . t:dchar.buf[n] . ">"
+		if empty(t:DChar.mid[n])
+			exec "au! BufWinLeave <buffer=" . t:DChar.buf[n] . ">"
 		endif
 	endfor
 
-	" unlet t:dchar when no DiffChar highlightings in either buffer
-	if empty(t:dchar.mid[1]) || empty(t:dchar.mid[2])
-		unlet t:dchar
+	" unlet t:DChar when no DiffChar highlightings in either buffer
+	if empty(t:DChar.mid[1]) || empty(t:DChar.mid[2])
+		unlet t:DChar
 	endif
 
 	exec cwin . "wincmd w"
 endfunction
 
 function! s:ShowDiffChar(sline, eline)
-	" initialize when t:dchar is not defined
-	if !exists("t:dchar") && s:InitializeDiffChar() == -1
+	" initialize when t:DChar is not defined
+	if !exists("t:DChar") && s:InitializeDiffChar() == -1
 		return
 	endif
 
 	let cwin = winnr()
 	let cbuf = winbufnr(cwin)
-	if cbuf != t:dchar.buf[1] && cbuf != t:dchar.buf[2] | return | endif
+	if cbuf != t:DChar.buf[1] && cbuf != t:DChar.buf[2] | return | endif
 
 	" create a DiffChar line list between sline/eline and get those lines
-	if t:dchar.vdm		" diff mode
+	if t:DChar.vdm		" diff mode
 		let [d1, d2] = s:GetDiffModeLines(a:sline, a:eline)
 		for n in [1, 2]
 			let t{n} = []
 			for d in d{n}
-				let t{n} += getbufline(t:dchar.buf[n], d)
+				let t{n} += getbufline(t:DChar.buf[n], d)
 			endfor
 			let n{n} = len(t{n})
 		endfor
 	else			" non-diff mode
 		for n in [1, 2]
-			let t{n} = getbufline(t:dchar.buf[n], a:sline, a:eline)
+			let t{n} = getbufline(t:DChar.buf[n], a:sline, a:eline)
 			let n{n} = len(t{n})
 			let d{n} = range(a:sline, a:sline + n{n} - 1)
 		endfor
@@ -295,8 +309,8 @@ function! s:ShowDiffChar(sline, eline)
 		if t1[n] ==# t2[n] | continue | endif
 
 		" split each line to the difference units
-		let u1 = split(t1[n], t:dchar.spt)
-		let u2 = split(t2[n], t:dchar.spt)
+		let u1 = split(t1[n], t:DChar.spt)
+		let u2 = split(t2[n], t:DChar.spt)
 
 		" find first/last same units and get them out to trace
 		let ns = min([len(u1), len(u2)])
@@ -341,22 +355,22 @@ function! s:ShowDiffChar(sline, eline)
 	for n in [1, 2]
 		" a split buf has more than 1 windows
 		for w in range(1, winnr('$'))
-			if winbufnr(w) == t:dchar.buf[n]
+			if winbufnr(w) == t:DChar.buf[n]
 				exec w . "wincmd w"
 				call s:ClearDiffChar(n, keys(lc{n}))
 			endif
 		endfor
-		exec bufwinnr(t:dchar.buf[n]) . "wincmd w"
+		exec bufwinnr(t:DChar.buf[n]) . "wincmd w"
 		call s:HighlightDiffChar(n, lc{n})
-		if !empty(t:dchar.mid[n]) &&
-			\!exists("#BufWinLeave#<buffer=" . t:dchar.buf[n] . ">")
-			exec "au BufWinLeave <buffer=" . t:dchar.buf[n] . "> call s:ResetDiffChar(1, line('$'))"
+		if !empty(t:DChar.mid[n]) &&
+			\!exists("#BufWinLeave#<buffer=" . t:DChar.buf[n] . ">")
+			exec "au BufWinLeave <buffer=" . t:DChar.buf[n] . "> call s:ResetDiffChar(1, line('$'))"
 		endif
 	endfor
 
-	" unlet t:dchar when no DiffChar highlightings in either buffer
-	if empty(t:dchar.mid[1]) || empty(t:dchar.mid[2])
-		unlet t:dchar
+	" unlet t:DChar when no DiffChar highlightings in either buffer
+	if empty(t:DChar.mid[1]) || empty(t:DChar.mid[2])
+		unlet t:DChar
 	endif
 
 	exec cwin . "wincmd w"
@@ -364,13 +378,13 @@ endfunction
 
 function! s:GetDiffModeLines(sline, eline)
 	" in diff mode, need to compare the different line between buffers
-	" if current buffer is t:dchar.buf[1], narrow sline <= t:dchar.dcl[1]
-	" <= eline and get the corresponding lines from t:dchar.dcl[2]
-	let d1 = copy(t:dchar.dcl[1])
-	let d2 = copy(t:dchar.dcl[2])
+	" if current buffer is t:DChar.buf[1], narrow sline <= t:DChar.dcl[1]
+	" <= eline and get the corresponding lines from t:DChar.dcl[2]
+	let d1 = copy(t:DChar.dcl[1])
+	let d2 = copy(t:DChar.dcl[2])
 	let cbuf = winbufnr(0)
-	if cbuf == t:dchar.buf[1] | let i = 1 | let j = 2
-	elseif cbuf == t:dchar.buf[2] | let i = 2 | let j = 1 | endif
+	if cbuf == t:DChar.buf[1] | let i = 1 | let j = 2
+	elseif cbuf == t:DChar.buf[2] | let i = 2 | let j = 1 | endif
 	for n in range(len(d{i}))
 		if d{i}[n] < a:sline || a:eline < d{i}[n]
 			let d{i}[n] = -1
@@ -387,18 +401,18 @@ function! s:ClearDiffChar(n, lines)
 	" if recorded mids are not included in actual mids, no need to clean
 	let amid = sort(map(getmatches(),'v:val.id'))
 	let rmid = []
-	for m in values(t:dchar.mid[a:n])
+	for m in values(t:DChar.mid[a:n])
 		let rmid += m
 	endfor
 	if uniq(sort(amid + rmid)) != amid | return | endif
 
 	for l in a:lines
-		if has_key(t:dchar.mid[a:n], l)
-			for id in t:dchar.mid[a:n][l]
+		if has_key(t:DChar.mid[a:n], l)
+			for id in t:DChar.mid[a:n][l]
 				call matchdelete(id)
 			endfor
-			unlet t:dchar.mid[a:n][l]
-			unlet t:dchar.hlc[a:n][l]
+			unlet t:DChar.mid[a:n][l]
+			unlet t:DChar.hlc[a:n][l]
 		endif
 	endfor
 endfunction
@@ -429,22 +443,22 @@ function! s:HighlightDiffChar(n, lncol)
 			endfor
 			let mid += [matchadd("DiffText", dl . '\%(' . dc[: -3] . '\)', 0)]
 		endif
-		let t:dchar.mid[a:n][line] = mid
-		let t:dchar.hlc[a:n][line] = hlc
+		let t:DChar.mid[a:n][line] = mid
+		let t:DChar.hlc[a:n][line] = hlc
 	endfor
 endfunction
 
 function! s:MoveCursorDiffChar(dir, pos)
 	" dir : 1 = forward, else = backward
 	" pos : 1 = start, else = end
-	if !exists("t:dchar") | return | endif
+	if !exists("t:DChar") | return | endif
 	let cbuf = winbufnr(0)
-	if cbuf != t:dchar.buf[1] && cbuf != t:dchar.buf[2] | return | endif
-	let n = (cbuf == t:dchar.buf[1]) ? 1 : 2
+	if cbuf != t:DChar.buf[1] && cbuf != t:DChar.buf[2] | return | endif
+	let n = (cbuf == t:DChar.buf[1]) ? 1 : 2
 
 	let l = line('.')
-	if has_key(t:dchar.hlc[n], l) && !empty(t:dchar.hlc[n][l])
-		let hlc = map(copy(t:dchar.hlc[n][l]), 'v:val[a:pos ? 0 : 1]')
+	if has_key(t:DChar.hlc[n], l) && !empty(t:DChar.hlc[n][l])
+		let hlc = map(copy(t:DChar.hlc[n][l]), 'v:val[a:pos ? 0 : 1]')
 		if !a:dir
 			call map(reverse(hlc), '- v:val')
 		endif
@@ -461,8 +475,8 @@ function! s:MoveCursorDiffChar(dir, pos)
 	endif
 	let l = a:dir ? l + 1 : l - 1
 	while 1 <= l && l <= line('$')
-		if has_key(t:dchar.hlc[n], l) && !empty(t:dchar.hlc[n][l])
-			let hlc = map(copy(t:dchar.hlc[n][l]), 'v:val[a:pos ? 0 : 1]')
+		if has_key(t:DChar.hlc[n], l) && !empty(t:DChar.hlc[n][l])
+			let hlc = map(copy(t:DChar.hlc[n][l]), 'v:val[a:pos ? 0 : 1]')
 			call cursor(l, hlc[a:dir ? 0 : -1])
 			return
 		endif
