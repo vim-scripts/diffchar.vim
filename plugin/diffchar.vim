@@ -32,6 +32,16 @@
 "
 " This script has been always positively supporting mulltibyte characters.
 "
+" Update : 4.0
+" * Enhanced to easily find a corresponding pair of each difference unit.
+"   - each unit pair will be shown in individual same color on both windows.
+"     A g:DiffColors (and t:DiffColors) variable is a type of matching colors,
+"     0 (default) for always 1 color as before, 1/2/3 for 4/8/16 colors in
+"     fixed order, and 100 for all available colors in dynamic random order.
+"   - when jumping cursor by "[b"/"]b" or "[e"/"]e" in either window,
+"     the start or end position of a matching unit will be highlighted with
+"     a cursor-type color in another window.
+"
 " Update : 3.6
 " * Added two g:DiffUnit (and t:DiffUnit) types. "Word3" will split at the
 "   \< or \> boundaries, which can separate based on the character class like
@@ -92,10 +102,10 @@
 "   the initial version.
 "
 " Author: Rick Howe
-" Last Change: 2014/06/06
+" Last Change: 2014/06/10
 " Created:
 " Requires:
-" Version: 3.6
+" Version: 4.0
 
 if exists("g:loaded_diffchar")
 	finish
@@ -112,10 +122,10 @@ command! -range RDChar call s:ResetDiffChar(<line1>, <line2>)
 " Sample keymaps
 nnoremap <silent> <F7> :call <SID>ToggleDiffChar(1, line('$'))<CR>
 nnoremap <silent> <F8> :call <SID>ToggleDiffChar(line('.'))<CR>
-nnoremap <silent> [b :call <SID>MoveCursorDiffChar(0, 1)<CR>
-nnoremap <silent> ]b :call <SID>MoveCursorDiffChar(1, 1)<CR>
-nnoremap <silent> [e :call <SID>MoveCursorDiffChar(0, 0)<CR>
-nnoremap <silent> ]e :call <SID>MoveCursorDiffChar(1, 0)<CR>
+nnoremap <silent> [b :call <SID>JumpDiffChar(0, 1)<CR>
+nnoremap <silent> ]b :call <SID>JumpDiffChar(1, 1)<CR>
+nnoremap <silent> [e :call <SID>JumpDiffChar(0, 0)<CR>
+nnoremap <silent> ]e :call <SID>JumpDiffChar(1, 0)<CR>
 
 " Set a difference unit type
 let g:DiffUnit = "Char"		" any single character
@@ -123,6 +133,13 @@ let g:DiffUnit = "Char"		" any single character
 " let g:DiffUnit = "Word2"	" non-space and space words
 " let g:DiffUnit = "Word3"	" \< or \> character class boundaries
 " let g:DiffUnit = "CSV(,)"	" character separated by (,;\t)
+
+" Set a difference unit matching colors
+let g:DiffColors = 0		" always 1 color
+" let g:DiffColors = 1		" 4 colors in fixed order
+" let g:DiffColors = 2		" 8 colors in fixed order
+" let g:DiffColors = 3		" 16 colors in fixed order
+" let g:DiffColors = 100	" all available colors in dynamic random order
 
 " Set a difference algorithm
 let g:DiffAlgorithm = "ONP"
@@ -149,24 +166,24 @@ function! s:InitializeDiffChar()
 		let i += 1
 	endwhile
 
-	" find corresponding DiffChange/DiffText highlight lines on both
-	" diff mode buffers and set vim diff mode for selected buffers
-	let t:DChar.vdm = 1
+	" find corresponding DiffChange/DiffText lines on diff mode buffers
 	let dcID = hlID("DiffChange")
 	let dtID = hlID("DiffText")
-	let t:DChar.dcl = {}
+	let t:DChar.vdl = {}
 	for n in [1, 2]
 		exec bufwinnr(t:DChar.buf[n]) . "wincmd w"
-		let t:DChar.dcl[n] = []
 		if &diff
+			let t:DChar.vdl[n] = []
 			for l in range(1, line('$'))
 				let id = diff_hlID(l, 1)
 				if id == dcID || id == dtID
-					let t:DChar.dcl[n] += [l]
+					let t:DChar.vdl[n] += [l]
 				endif
 			endfor
+		else
+			unlet t:DChar.vdl
+			break
 		endif
-		let t:DChar.vdm = and(t:DChar.vdm, &diff)
 	endfor
 
 	" set line and its highlight id record
@@ -204,6 +221,41 @@ function! s:InitializeDiffChar()
 		let t:DiffAlgorithm = g:DiffAlgorithm
 	endif
 
+	" set a matching pair cursor id on this tab page
+	let t:DChar.mpc = {}
+
+	" set a difference matching colors on this tab page
+	if !exists("t:DiffColors")
+		let t:DiffColors = g:DiffColors
+	endif
+
+	" set types of difference matching colors from available highlights
+	let t:DChar.dmc = ["DiffText"]
+	if t:DiffColors == 1
+		let t:DChar.dmc += ["DiffDelete", "WildMenu", "VisualNOS"]
+	elseif t:DiffColors == 2
+		let t:DChar.dmc += ["DiffDelete", "WildMenu", "TabLine",
+			\"ErrorMsg", "DiffAdd", "VisualNOS", "Conceal"]
+	elseif t:DiffColors == 3
+		let t:DChar.dmc += ["ModeMsg", "DiffDelete", "Title",
+			\"WildMenu", "CursorLineNr", "TabLine", "NonText",
+			\"ErrorMsg", "StatusLine", "DiffAdd", "WarningMsg",
+			\"VisualNOS", "MoreMsg", "Conceal", "SpecialKey"]
+	elseif t:DiffColors == 100
+		redir => hl | silent highlight | redir END
+		let h = map(filter(split(hl, '\n'),
+			\'v:val =~ "^\\S" && v:val =~ "="'), 'split(v:val)[0]')
+		unlet h[index(h, "DiffChange")]
+		unlet h[index(h, "DiffText")]
+		unlet h[index(h, hlexists("Cursor") ? "Cursor" : "MatchParen")]
+		while !empty(h)
+			let r = localtime() % len(h)
+			"let r = &lines * &columns % len(h)
+			"let r = v:version % len(h)
+			let t:DChar.dmc += [h[r]] | unlet h[r]
+		endwhile
+	endif
+
 	exec cwin . "wincmd w"
 endfunction
 
@@ -228,12 +280,14 @@ function! s:ResetDiffChar(sline, eline)
 
 	let cwin = winnr()
 	let cbuf = winbufnr(cwin)
-	if cbuf != t:DChar.buf[1] && cbuf != t:DChar.buf[2] | return | endif
+	if cbuf == t:DChar.buf[1] | let n = 1
+	elseif cbuf == t:DChar.buf[2] | let n = 2
+	else | return | endif
 
 	" create a DiffChar line list between sline/eline
-	if t:DChar.vdm		" diff mode
-		let [d1, d2] = s:GetDiffModeLines(a:sline, a:eline)
-	else			" non-diff mode
+	if exists("t:DChar.vdl")	" diff mode
+		let [d1, d2] = s:GetDiffModeLines(n, a:sline, a:eline)
+	else				" non-diff mode
 		for n in [1, 2]
 			let d{n} = range(a:sline, a:eline)
 		endfor
@@ -249,6 +303,7 @@ function! s:ResetDiffChar(sline, eline)
 		endfor
 		if empty(t:DChar.mid[n])
 			exec "au! BufWinLeave <buffer=" . t:DChar.buf[n] . ">"
+			call s:ResetDiffCharPairs(n)
 		endif
 	endfor
 
@@ -268,11 +323,13 @@ function! s:ShowDiffChar(sline, eline)
 
 	let cwin = winnr()
 	let cbuf = winbufnr(cwin)
-	if cbuf != t:DChar.buf[1] && cbuf != t:DChar.buf[2] | return | endif
+	if cbuf == t:DChar.buf[1] | let n = 1
+	elseif cbuf == t:DChar.buf[2] | let n = 2
+	else | return | endif
 
 	" create a DiffChar line list between sline/eline and get those lines
-	if t:DChar.vdm		" diff mode
-		let [d1, d2] = s:GetDiffModeLines(a:sline, a:eline)
+	if exists("t:DChar.vdl")	" diff mode
+		let [d1, d2] = s:GetDiffModeLines(n, a:sline, a:eline)
 		for n in [1, 2]
 			let t{n} = []
 			for d in d{n}
@@ -280,7 +337,7 @@ function! s:ShowDiffChar(sline, eline)
 			endfor
 			let n{n} = len(t{n})
 		endfor
-	else			" non-diff mode
+	else				" non-diff mode
 		for n in [1, 2]
 			let t{n} = getbufline(t:DChar.buf[n], a:sline, a:eline)
 			let n{n} = len(t{n})
@@ -330,21 +387,33 @@ function! s:ShowDiffChar(sline, eline)
 		" trace the actual diffference units
 		let c1 = []
 		let c2 = []
+		let h1 = []
+		let h2 = []
 		let l1 = len(join(fsu, ''))
 		let l2 = l1
 		for [edit, unit] in s:TraceDiffChar{t:DiffAlgorithm}(u1d, u2d)
 			let m = len(unit)
 			if edit == '='
+				if !empty(h1) || !empty(h2)
+					let c1 += [h1]
+					let c2 += [h2]
+					let h1 = []
+					let h2 = []
+				endif
 				let l1 += m
 				let l2 += m
 			elseif edit == '-'
-				let c1 += range(l1 + 1, l1 + m)
+				let h1 += range(l1 + 1, l1 + m)
 				let l1 += m
 			elseif edit == '+'
-				let c2 += range(l2 + 1, l2 + m)
+				let h2 += range(l2 + 1, l2 + m)
 				let l2 += m
 			endif
 		endfor
+		if !empty(h1) || !empty(h2)
+			let c1 += [h1]
+			let c2 += [h2]
+		endif
 
 		" add different lines and columns to the list
 		let lc1[d1[n]] = c1
@@ -364,11 +433,12 @@ function! s:ShowDiffChar(sline, eline)
 		call s:HighlightDiffChar(n, lc{n})
 		if !empty(t:DChar.mid[n]) &&
 			\!exists("#BufWinLeave#<buffer=" . t:DChar.buf[n] . ">")
-			exec "au BufWinLeave <buffer=" . t:DChar.buf[n] . "> call s:ResetDiffChar(1, line('$'))"
+			exec "au BufWinLeave <buffer=" . t:DChar.buf[n] .
+					\"> call s:ResetDiffChar(1, line('$'))"
 		endif
 	endfor
 
-	" unlet t:DChar when no DiffChar highlightings in either buffer
+	" reset t:DChar when no DiffChar highlightings in either buffer
 	if empty(t:DChar.mid[1]) || empty(t:DChar.mid[2])
 		unlet t:DChar
 	endif
@@ -376,15 +446,13 @@ function! s:ShowDiffChar(sline, eline)
 	exec cwin . "wincmd w"
 endfunction
 
-function! s:GetDiffModeLines(sline, eline)
+function! s:GetDiffModeLines(n, sline, eline)
 	" in diff mode, need to compare the different line between buffers
-	" if current buffer is t:DChar.buf[1], narrow sline <= t:DChar.dcl[1]
-	" <= eline and get the corresponding lines from t:DChar.dcl[2]
-	let d1 = copy(t:DChar.dcl[1])
-	let d2 = copy(t:DChar.dcl[2])
-	let cbuf = winbufnr(0)
-	if cbuf == t:DChar.buf[1] | let i = 1 | let j = 2
-	elseif cbuf == t:DChar.buf[2] | let i = 2 | let j = 1 | endif
+	" if current buffer is t:DChar.buf[1], narrow sline <= t:DChar.vdl[1]
+	" <= eline and get the corresponding lines from t:DChar.vdl[2]
+	let [i, j] = (a:n == 1) ? [1, 2] : [2, 1]
+	let d1 = copy(t:DChar.vdl[1])
+	let d2 = copy(t:DChar.vdl[2])
 	for n in range(len(d{i}))
 		if d{i}[n] < a:sline || a:eline < d{i}[n]
 			let d{i}[n] = -1
@@ -418,70 +486,110 @@ function! s:ClearDiffChar(n, lines)
 endfunction
 
 function! s:HighlightDiffChar(n, lncol)
+	let cnum = len(t:DChar.dmc)
 	for [line, col] in items(a:lncol)
 		let dl = '\%' . line . 'l'
 		let mid = [matchadd("DiffChange", dl . '.', 0)]
-		let hlc = []
-		if !empty(col)
-			let dc = col[0]
-			for c in range(1, len(col) - 1)
-				let dc .= (col[c - 1] + 1 == col[c] ?  '-' : '#') . col[c]
-			endfor
-			for d in split(substitute(dc, '\d\+-\zs\%(\d\+-\)\+\ze\d\+', '', 'g'), '#')
-				let hlc += map(d =~ '-' ? [split(d, '-')] : [[d, d]], '[eval(v:val[0]), eval(v:val[1])]') 
-			endfor
-			let dc = ''
-			for [s, e] in hlc
-				if s == e
-					let dc .= '\%' . s . 'c'
-				elseif s + 1 == e
-					let dc .= '\%' . s . 'c\|\%' . e . 'c'
-				else
-					let dc .= '\%>' . (s - 1) . 'c\%<' . (e + 1) . 'c'
-				endif
-				let dc .= '\|'
-			endfor
-			let mid += [matchadd("DiffText", dl . '\%(' . dc[: -3] . '\)', 0)]
-		endif
+		for n in range(len(col))
+			let c = col[n]
+			if empty(c) | continue | endif
+			let dc = '\%>' . (c[0] - 1) . 'c\%<' . (c[-1] + 1) . 'c'
+			let mid += [matchadd(t:DChar.dmc[n % cnum], dl . dc, 0)]
+		endfor
 		let t:DChar.mid[a:n][line] = mid
-		let t:DChar.hlc[a:n][line] = hlc
+		let t:DChar.hlc[a:n][line] = col
 	endfor
 endfunction
 
-function! s:MoveCursorDiffChar(dir, pos)
+function! s:JumpDiffChar(dir, pos)
 	" dir : 1 = forward, else = backward
 	" pos : 1 = start, else = end
 	if !exists("t:DChar") | return | endif
 	let cbuf = winbufnr(0)
-	if cbuf != t:DChar.buf[1] && cbuf != t:DChar.buf[2] | return | endif
-	let n = (cbuf == t:DChar.buf[1]) ? 1 : 2
+	if cbuf == t:DChar.buf[1] | let n = 1
+	elseif cbuf == t:DChar.buf[2] | let n = 2
+	else | return | endif
 
 	let l = line('.')
-	if has_key(t:DChar.hlc[n], l) && !empty(t:DChar.hlc[n][l])
-		let hlc = map(copy(t:DChar.hlc[n][l]), 'v:val[a:pos ? 0 : 1]')
-		if !a:dir
-			call map(reverse(hlc), '- v:val')
-		endif
-		let c = a:dir ? col('.') : - col('.')
-		if !a:pos	" end position workaround for multibyte char
-			let m = len(matchstr(getline('.'), '.', col('.') - 1))
-			let c = a:dir ? c + (m - 1) : c - (m - 1)
-		endif
-		call filter(hlc, 'c < v:val')
+	if has_key(t:DChar.hlc[n], l)
+		let hlc = map(filter(copy(t:DChar.hlc[n][l]), '!empty(v:val)'),
+						\'v:val[a:pos ? 0 : -1]')  
 		if !empty(hlc)
-			call cursor(l, a:dir ? hlc[0] : - hlc[0])
-			return
+			if !a:dir
+				call map(reverse(hlc), '- v:val')
+			endif
+			let c = a:dir ? col('.') : - col('.')
+			if !a:pos	" end pos workaround for multibyte char
+				let z = len(matchstr(getline(l), '.',
+								\col('.') - 1))
+				let c = a:dir ? c + (z - 1) : c - (z - 1)
+			endif
+			call filter(hlc, 'c < v:val')
+			if !empty(hlc)
+				let c =  a:dir ? hlc[0] : - hlc[0]
+				call cursor(l, c)
+				call s:ShowDiffCharPairs(n, l, c, a:pos)
+				return
+			endif
 		endif
 	endif
 	let l = a:dir ? l + 1 : l - 1
 	while 1 <= l && l <= line('$')
-		if has_key(t:DChar.hlc[n], l) && !empty(t:DChar.hlc[n][l])
-			let hlc = map(copy(t:DChar.hlc[n][l]), 'v:val[a:pos ? 0 : 1]')
-			call cursor(l, hlc[a:dir ? 0 : -1])
-			return
+		if has_key(t:DChar.hlc[n], l)
+			let hlc = map(filter(copy(t:DChar.hlc[n][l]),
+				\'!empty(v:val)'), 'v:val[a:pos ? 0 : -1]')  
+			if !empty(hlc)
+				let c = a:dir ? hlc[0] : hlc[-1]
+				call cursor(l, c)
+				call s:ShowDiffCharPairs(n, l, c, a:pos)
+				return
+			endif
 		endif
 		let l = a:dir ? l + 1 : l - 1
 	endwhile
+endfunction
+
+function! s:ShowDiffCharPairs(n, line, col, pos)
+	for idx in range(len(t:DChar.hlc[a:n][a:line]))
+		if index(t:DChar.hlc[a:n][a:line][idx], a:col) != -1
+			break
+		endif
+	endfor
+
+	let m = (a:n == 1) ? 2 : 1
+	if exists("t:DChar.vdl")	" diff mode
+		let line = t:DChar.vdl[m][index(t:DChar.vdl[a:n], a:line)]
+	else				" non-diff mode
+		let line = a:line
+	endif
+
+	exec bufwinnr(t:DChar.buf[m]) . "wincmd w"
+	call s:ResetDiffCharPairs(m)
+	let col = t:DChar.hlc[m][line][idx]
+	if !empty(col)
+		if !a:pos	" end pos workaround for multibyte char
+			let c = col[-len(split(getline(line)
+				\[col[0] - 1 : col[-1] - 1], '\zs')[-1])]
+		else
+			let c = col[0]
+		endif
+		let t:DChar.mpc[m] =
+			\matchadd(hlexists("Cursor") ? "Cursor" : "MatchParen",
+					\'\%' . line . 'l\%' . c . 'c', 0)
+		if !exists("#CursorMoved#<buffer=" . t:DChar.buf[m] . ">")
+			exec "au CursorMoved <buffer=" . t:DChar.buf[m] .
+				\"> call s:ResetDiffCharPairs(" . m . ")"
+		endif
+	endif
+	exec bufwinnr(t:DChar.buf[a:n]) . "wincmd w"
+endfunction
+
+function! s:ResetDiffCharPairs(n)
+	if exists("t:DChar.mpc[a:n]")
+		call matchdelete(t:DChar.mpc[a:n])
+		unlet t:DChar.mpc[a:n]
+	endif
+	exec "au! CursorMoved <buffer=" . t:DChar.buf[a:n] . ">"
 endfunction
 
 " O(NP) Difference algorithm
@@ -585,7 +693,8 @@ function! s:TraceDiffCharOND(u1, u2)
 	for D in range(offset + 1)
 		let etree += [[]]	" add a list for each D
 		for k in range(-D, D, 2)
-			if k == -D || k != D && V[k - 1 + offset] < V[k + 1 + offset]
+			if k == -D || k != D &&
+					\V[k - 1 + offset] < V[k + 1 + offset]
 				let x = V[k + 1 + offset]
 				let pk = k + 1
 				let ed = '+'
@@ -665,11 +774,14 @@ function! s:TraceDiffCharBasic(u1, u2)
 	for i in range(n1 - 1, 0, -1)		" other points from goal
 		for j in range(n2 - 1, 0, -1)
 			if a:u1[i] ==# a:u2[j]
-				let egraph[i][j] = ['=', egraph[i + 1][j + 1][1]]
+				let egraph[i][j] =
+						\['=', egraph[i + 1][j + 1][1]]
 			elseif egraph[i + 1][j][1] < egraph[i][j + 1][1]
-				let egraph[i][j] = ['-', egraph[i + 1][j][1] + 1]
+				let egraph[i][j] =
+						\['-', egraph[i + 1][j][1] + 1]
 			else
-				let egraph[i][j] = ['+', egraph[i][j + 1][1] + 1]
+				let egraph[i][j] =
+						\['+', egraph[i][j + 1][1] + 1]
 			endif
 		endfor
 	endfor

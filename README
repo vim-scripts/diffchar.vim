@@ -28,6 +28,11 @@ Sample keymaps:
 
 This script has been always positively supporting mulltibyte characters.
 
+Update : 4.0
+* Enhanced to easily find a corresponding pair of each difference unit.
+  - each unit pair will be shown in individual same color on both windows. A g:DiffColors (and t:DiffColors) variable is a type of matching colors, 0 (default) for always 1 color as before, 1/2/3 for 4/8/16 colors in fixed order, and 100 for all available colors in dynamic random order.
+  - when jumping cursor by "[b"/"]b" or "[e"/"]e" in either window, the start or end position of a matching unit will be highlighted with a cursor-type color in another window.
+
 Update : 3.6
 * Added two g:DiffUnit (and t:DiffUnit) types. "Word3" will split at the \< or \> boundaries, which can separate based on the character class like CJK, Hiragana, Katakana, Hangul, full width symbols and so on. And "CSV(c)" will split the units by a specified character "c". For example, "CSV(,)" and "CSV(\t)" can be used for comma and tab separated text.
 
