@@ -28,6 +28,10 @@ Sample keymaps:
 
 This script has been always positively supporting mulltibyte characters.
 
+Update : 4.1
+* Implemented to echo a matching difference unit with its color when jumping cursor by "[b"/"]b" or "[e"/"]e".
+* Fixed defects: not using the new uniq() function introduced in vim 7.4.
+
 Update : 4.0
 * Enhanced to easily find a corresponding pair of each difference unit.
   - each unit pair will be shown in individual same color on both windows. A g:DiffColors (and t:DiffColors) variable is a type of matching colors, 0 (default) for always 1 color as before, 1/2/3 for 4/8/16 colors in fixed order, and 100 for all available colors in dynamic random order.
