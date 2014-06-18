@@ -18,17 +18,17 @@
 "      (file A) The <|swift brown|> fox jumped over the <|lazy|> dog.
 "      (file B) The <|lazy|> fox jumped over the <|swift brown|> dog.
 "
-" Sample commands:
+" Default commands:
 " :[range]SDChar (Highlight DiffChar for [range])
 " :[range]RDChar (Reset DiffChar for [range])
 "
-" Sample keymaps:
-" <F7> (for all lines and toggle the DiffChar highlight)
-" <F8> (for current line and toggle the DiffChar highlight)
-" [b (jump to the start position of the previous DiffChar unit)
-" ]b (jump to the start position of the next DiffChar unit)
-" [e (jump to the end position of the previous DiffChar unit)
-" ]e (jump to the end position of the next DiffChar unit)
+" Default <Plug> mappings:
+" <Plug>(DiffChar_ToggleAllLines)    (toggle DiffChar for all lines)
+" <Plug>(DiffChar_ToggleCurrentLine) (toggle DiffChar for the current line)
+" <Plug>(DiffChar_PrevStart)         (jump to the start position of the previous DiffChar unit)
+" <Plug>(DiffChar_NextStart)         (jump to the start position of the next DiffChar unit)
+" <Plug>(DiffChar_NextEnd)           (jump to the end position of the previous DiffChar unit)
+" <Plug>(DiffChar_NextEnd)           (jump to the end position of the next DiffChar unit)
 "
 " This script has been always positively supporting mulltibyte characters.
 "
@@ -107,7 +107,7 @@
 "   the initial version.
 "
 " Author: Rick Howe
-" Last Change: 2014/06/14
+" Last Change: 2014/06/18
 " Created:
 " Requires:
 " Version: 4.1
@@ -120,17 +120,17 @@ let g:loaded_diffchar = 4.1
 let s:save_cpo = &cpo
 set cpo&vim
 
-" Sample commands
+" Default commands
 command! -range SDChar call s:ShowDiffChar(<line1>, <line2>)
 command! -range RDChar call s:ResetDiffChar(<line1>, <line2>)
 
-" Sample keymaps
-nnoremap <silent> <F7> :call <SID>ToggleDiffChar(1, line('$'))<CR>
-nnoremap <silent> <F8> :call <SID>ToggleDiffChar(line('.'))<CR>
-nnoremap <silent> [b :call <SID>JumpDiffChar(0, 1)<CR>
-nnoremap <silent> ]b :call <SID>JumpDiffChar(1, 1)<CR>
-nnoremap <silent> [e :call <SID>JumpDiffChar(0, 0)<CR>
-nnoremap <silent> ]e :call <SID>JumpDiffChar(1, 0)<CR>
+" Default mappings
+nnoremap <silent> <Plug>(DiffChar_ToggleAllLines)    :call <SID>ToggleDiffChar(1, line('$'))<CR>
+nnoremap <silent> <Plug>(DiffChar_ToggleCurrentLine) :call <SID>ToggleDiffChar(line('.'))<CR>
+nnoremap <silent> <Plug>(DiffChar_PrevStart)         :call <SID>JumpDiffChar(0, 1)<CR>
+nnoremap <silent> <Plug>(DiffChar_NextStart)         :call <SID>JumpDiffChar(1, 1)<CR>
+nnoremap <silent> <Plug>(DiffChar_NextEnd)           :call <SID>JumpDiffChar(0, 0)<CR>
+nnoremap <silent> <Plug>(DiffChar_NextEnd)           :call <SID>JumpDiffChar(1, 0)<CR>
 
 " Set a difference unit type
 let g:DiffUnit = "Char"		" any single character
