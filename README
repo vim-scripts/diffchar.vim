@@ -28,6 +28,9 @@ Sample keymaps:
 
 This script has been always positively supporting mulltibyte characters.
 
+Update : 4.2
+* Enhanced to update the highlighted DiffChar units while editing. A g:DiffUpdate (and t:DiffUpdate) variable enables and disables (default) this update behavior. If a text line was added/deleted, reset all the highlightings. This feature is available on vim 7.4.
+
 Update : 4.1
 * Implemented to echo a matching difference unit with its color when jumping cursor by "[b"/"]b" or "[e"/"]e".
 * Fixed defects: not using the new uniq() function introduced in vim 7.4.

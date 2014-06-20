@@ -32,6 +32,12 @@
 "
 " This script has been always positively supporting mulltibyte characters.
 "
+" Update : 4.2
+" * Enhanced to update the highlighted DiffChar units while editing.
+"   A g:DiffUpdate (and t:DiffUpdate) variable enables and disables (default)
+"   this update behavior. If a text line was added/deleted, reset all the
+"   highlightings. This feature is available on vim 7.4.
+"
 " Update : 4.1
 " * Implemented to echo a matching difference unit with its color when jumping
 "   cursor by "[b"/"]b" or "[e"/"]e".
@@ -107,15 +113,15 @@
 "   the initial version.
 "
 " Author: Rick Howe
-" Last Change: 2014/06/14
+" Last Change: 2014/06/20
 " Created:
 " Requires:
-" Version: 4.1
+" Version: 4.2
 
 if exists("g:loaded_diffchar")
 	finish
 endif
-let g:loaded_diffchar = 4.1
+let g:loaded_diffchar = 4.2
 
 let s:save_cpo = &cpo
 set cpo&vim
@@ -145,6 +151,12 @@ let g:DiffColors = 0		" always 1 color
 " let g:DiffColors = 2		" 8 colors in fixed order
 " let g:DiffColors = 3		" 16 colors in fixed order
 " let g:DiffColors = 100	" all available colors in dynamic random order
+
+" Set a difference unit updating while editing
+if v:version >= 704
+let g:DiffUpdate = 0		" disable
+" let g:DiffUpdate = 1		" enable
+endif
 
 " Set a difference algorithm
 let g:DiffAlgorithm = "ONP"
@@ -259,6 +271,15 @@ function! s:InitializeDiffChar()
 		endwhile
 	endif
 
+	" set a difference unit updating on this tab page
+	" and a record of line string values
+	if v:version >= 704
+		if !exists("t:DiffUpdate")
+			let t:DiffUpdate = g:DiffUpdate
+		endif
+		let t:DChar.lsv = {}
+	endif
+
 	exec cwin . "wincmd w"
 endfunction
 
@@ -269,8 +290,8 @@ function! s:ToggleDiffChar(...)
 
 	if exists("t:DChar")
 		for l in range(sline, eline)
-			if has_key(t:DChar.mid[1], l) ||
-						\has_key(t:DChar.mid[2], l)
+			if has_key(t:DChar.hlc[1], l) ||
+						\has_key(t:DChar.hlc[2], l)
 				call s:ResetDiffChar(sline, eline)
 				return
 			endif
@@ -288,7 +309,7 @@ function! s:ResetDiffChar(sline, eline)
 	elseif cbuf == t:DChar.buf[2] | let k = 2
 	else | return | endif
 
-	" create a DiffChar line list between sline/eline
+	" set a possible DiffChar line list between sline and eline
 	if exists("t:DChar.vdl")	" diff mode
 		let [d1, d2] = s:GetDiffModeLines(k, a:sline, a:eline)
 	else				" non-diff mode
@@ -297,21 +318,38 @@ function! s:ResetDiffChar(sline, eline)
 	endif
 
 	for k in [1, 2]
+		" remove not highlighted lines
+		let hl = map(keys(t:DChar.hlc[k]), 'eval(v:val)')
+		for n in range(len(d{k}))
+			if index(hl, d{k}[n]) == -1
+				let d{k}[n] = -1
+			endif
+		endfor
+		call filter(d{k}, 'v:val != -1')
+
+		let buf = t:DChar.buf[k]
+
 		" a split buf may have more than one windows, try all
 		for w in range(1, winnr('$'))
-			if winbufnr(w) == t:DChar.buf[k]
+			if winbufnr(w) == buf
 				exec w . "wincmd w"
 				call s:ClearDiffChar(k, d{k})
 			endif
 		endfor
-		if empty(t:DChar.mid[k])
-			exec "au! BufWinLeave <buffer=" . t:DChar.buf[k] . ">"
+
+		" when no highlight exists, reset events
+		if empty(t:DChar.hlc[k])
+			exec "au! BufWinLeave <buffer=" . buf . ">"
+			if v:version >= 704 && t:DiffUpdate
+				exec "au! TextChanged <buffer=" . buf . ">"
+				exec "au! TextChangedI <buffer=" . buf . ">"
+			endif
 			call s:ResetDiffCharPair(k)
 		endif
 	endfor
 
-	" unlet t:DChar when no DiffChar highlightings in either buffer
-	if empty(t:DChar.mid[1]) || empty(t:DChar.mid[2])
+	" reset t:DChar when no DiffChar highlightings in either buffer
+	if empty(t:DChar.hlc[1]) || empty(t:DChar.hlc[2])
 		unlet t:DChar
 	endif
 
@@ -330,26 +368,32 @@ function! s:ShowDiffChar(sline, eline)
 	elseif cbuf == t:DChar.buf[2] | let k = 2
 	else | return | endif
 
-	" create a DiffChar line list between sline/eline and get those lines
+	" set a possible DiffChar line list between sline and eline
 	if exists("t:DChar.vdl")	" diff mode
 		let [d1, d2] = s:GetDiffModeLines(k, a:sline, a:eline)
-		for k in [1, 2]
-			let t{k} = []
-			for d in d{k}
-				let t{k} += getbufline(t:DChar.buf[k], d)
-			endfor
-			let n{k} = len(t{k})
-		endfor
 	else				" non-diff mode
-		for k in [1, 2]
-			let t{k} = getbufline(t:DChar.buf[k], a:sline, a:eline)
-			let n{k} = len(t{k})
-			let d{k} = range(a:sline, a:sline + n{k} - 1)
-		endfor
+		let d1 = range(a:sline, a:eline)
+		let d2 = range(a:sline, a:eline)
 	endif
 
+	" remove already highlighted lines and get those text
+	for k in [1, 2]
+		let hl = map(keys(t:DChar.hlc[k]), 'eval(v:val)')
+		for n in range(len(d{k}))
+			if index(hl, d{k}[n]) != -1
+				let d{k}[n] = -1
+			endif
+		endfor
+		call filter(d{k}, 'v:val != -1')
+
+		let t{k} = []
+		for d in d{k}
+			let t{k} += getbufline(t:DChar.buf[k], d)
+		endfor
+		let n{k} = len(t{k})
+	endfor
+
 	" remove redundant lines in either window
-	if n1 == 0 || n2 == 0 | return | endif
 	if n1 > n2
 		unlet t1[n2 - n1 :]
 		unlet d1[n2 - n1 :]
@@ -414,30 +458,56 @@ function! s:ShowDiffChar(sline, eline)
 		let lc2[d2[n]] = c2
 	endfor
 
-	" highlight lines and columns and add it to the mid record
+	" highlight lines and columns and set events
 	for k in [1, 2]
-		" a split buf may have more than one windows, try all
-		for w in range(1, winnr('$'))
-			if winbufnr(w) == t:DChar.buf[k]
-				exec w . "wincmd w"
-				call s:ClearDiffChar(k, keys(lc{k}))
-			endif
-		endfor
-		exec bufwinnr(t:DChar.buf[k]) . "wincmd w"
+		let buf = t:DChar.buf[k]
+		exec bufwinnr(buf) . "wincmd w"
 		call s:HighlightDiffChar(k, lc{k})
-		if !empty(t:DChar.mid[k]) &&
-			\!exists("#BufWinLeave#<buffer=" . t:DChar.buf[k] . ">")
-			exec "au BufWinLeave <buffer=" . t:DChar.buf[k] .
+		if !empty(t:DChar.hlc[k])
+			if !exists("#BufWinLeave#<buffer=" . buf . ">")
+				exec "au BufWinLeave <buffer=" . buf .
 					\"> call s:ResetDiffChar(1, line('$'))"
+			endif
+			if v:version >= 704 && t:DiffUpdate
+				if !exists("#TextChanged#<buffer=" . buf . ">")
+					exec "au TextChanged <buffer=" . buf .
+						\"> call s:UpdateDiffChar("
+								\. k . ")"
+				endif
+				if !exists("#TextChangedI#<buffer=" . buf . ">")
+					exec "au TextChangedI <buffer=" . buf .
+						\"> call s:UpdateDiffChar("
+								\. k . ")"
+				endif
+				let t:DChar.lsv[k] = s:GetLineStrValues(k)
+			endif
 		endif
 	endfor
 
 	" reset t:DChar when no DiffChar highlightings in either buffer
-	if empty(t:DChar.mid[1]) || empty(t:DChar.mid[2])
+	if empty(t:DChar.hlc[1]) || empty(t:DChar.hlc[2])
 		unlet t:DChar
 	endif
 
 	exec cwin . "wincmd w"
+endfunction
+
+function! s:GetLineStrValues(key)
+	let hl = map(keys(t:DChar.hlc[a:key]), 'eval(v:val)')
+	let lsv = []
+	for l in range(1, line('$'))
+		if index(hl, l) != -1
+			let str = getline(l)
+			let val = 0
+			for n in range(len(str))
+				let val += char2nr(str[n]) * (n + 1)
+			endfor
+			let lsv += [val]
+		else
+			let lsv += [-1]
+		endif
+	endfor
+	return lsv
 endfunction
 
 function! s:GetDiffModeLines(key, sline, eline)
@@ -456,6 +526,29 @@ function! s:GetDiffModeLines(key, sline, eline)
 	call filter(d1, 'v:val != -1')
 	call filter(d2, 'v:val != -1')
 	return [d1, d2]
+endfunction
+
+function! s:UpdateDiffChar(key)
+	" if number of lines was changed, reset all
+	if len(t:DChar.lsv[a:key]) != line('$')
+		call s:ResetDiffChar(1, line('$'))
+		return
+	endif
+
+	" save the current t:DChar settings except highlightings
+	let sdc = deepcopy(t:DChar)
+	let sdc.mid[1] = {} | let sdc.mid[2] = {}
+	let sdc.hlc[1] = {} | let sdc.hlc[2] = {}
+
+	" update only highlighted and current changed lines
+	let lsv = s:GetLineStrValues(a:key)
+	for l in map(keys(t:DChar.hlc[a:key]), 'eval(v:val)')
+		if lsv[l - 1] != t:DChar.lsv[a:key][l - 1]
+			call s:ResetDiffChar(l, l)
+			if !exists("t:DChar") | let t:DChar = sdc | endif
+			call s:ShowDiffChar(l, l)
+		endif
+	endfor
 endfunction
 
 function! s:ClearDiffChar(key, lines)
@@ -481,16 +574,20 @@ endfunction
 function! s:HighlightDiffChar(key, lncol)
 	let nc = len(t:DChar.dmc)
 	for [line, col] in items(a:lncol)
-		let dl = '\%' . line . 'l'
-		let mid = [matchadd("DiffChange", dl . '.', 0)]
-		for i in range(len(col))
-			let c = col[i]
-			if empty(c) | continue | endif
-			let dc = '\%>' . (c[0] - 1) . 'c\%<' . (c[-1] + 1) . 'c'
-			let mid += [matchadd(t:DChar.dmc[i % nc], dl . dc, 0)]
-		endfor
-		let t:DChar.mid[a:key][line] = mid
-		let t:DChar.hlc[a:key][line] = col
+		if !has_key(t:DChar.mid[a:key], line)
+			let dl = '\%' . line . 'l'
+			let mid = [matchadd("DiffChange", dl . '.', 0)]
+			for i in range(len(col))
+				let c = col[i]
+				if empty(c) | continue | endif
+				let dc = '\%>' . (c[0] - 1) . 'c\%<' .
+							\(c[-1] + 1) . 'c'
+				let mid += [matchadd(t:DChar.dmc[i % nc],
+								\dl . dc, 0)]
+			endfor
+			let t:DChar.mid[a:key][line] = mid
+			let t:DChar.hlc[a:key][line] = col
+		endif
 	endfor
 endfunction
 
