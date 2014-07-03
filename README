@@ -28,6 +28,12 @@ Sample keymaps:
 
 This script has been always positively supporting mulltibyte characters.
 
+Update : 4.3 
+* Enhanced to differently show added/deleted/changed difference units with original diff highlightings. 
+- added units will be always highlighted with DiffAdd. 
+- changed units will be highlighted based on the g:DiffColors (and t:DiffColors) variable, but DiffText is always used for the first changed unit. 
+- when jumping cursor by "[b"/"]b" or "[e"/"]e" on the added unit, it highlights around the corresponding deleted units with a cursor-type color in another window, and echoes a diff-delete filler with DiffDelete, along with common characters on both sides (e.g. a-----b). 
+
 Update : 4.2
 * Enhanced to update the highlighted DiffChar units while editing. A g:DiffUpdate (and t:DiffUpdate) variable enables and disables (default) this update behavior. If a text line was added/deleted, reset all the highlightings. This feature is available on vim 7.4.
 

@@ -32,6 +32,18 @@
 "
 " This script has been always positively supporting mulltibyte characters.
 "
+" Update : 4.3
+"  Enhanced to differently show added/deleted/changed difference units
+"  with original diff highlightings.
+" - added units will be always highlighted with DiffAdd.
+" - changed units will be highlighted based on the g:DiffColors (and
+"   t:DiffColors) variable, but DiffText is always used for the first
+"   changed unit.
+" - when jumping cursor by "[b"/"]b" or "[e"/"]e" on the added unit, it
+"   highlights around the corresponding deleted units with a cursor-type color
+"   in another window, and echoes a diff-delete filler with DiffDelete,
+"   along with common characters on both sides (e.g. a-----b).
+"
 " Update : 4.2
 " * Enhanced to update the highlighted DiffChar units while editing.
 "   A g:DiffUpdate (and t:DiffUpdate) variable enables and disables (default)
@@ -113,15 +125,15 @@
 "   the initial version.
 "
 " Author: Rick Howe
-" Last Change: 2014/06/20
+" Last Change: 2014/07/03
 " Created:
 " Requires:
-" Version: 4.2
+" Version: 4.3
 
 if exists("g:loaded_diffchar")
 	finish
 endif
-let g:loaded_diffchar = 4.2
+let g:loaded_diffchar = 4.3
 
 let s:save_cpo = &cpo
 set cpo&vim
@@ -153,7 +165,7 @@ let g:DiffColors = 0		" always 1 color
 " let g:DiffColors = 100	" all available colors in dynamic random order
 
 " Set a difference unit updating while editing
-if v:version >= 704
+if exists("##TextChanged") && exists("##TextChangedI")
 let g:DiffUpdate = 0		" disable
 " let g:DiffUpdate = 1		" enable
 endif
@@ -249,19 +261,21 @@ function! s:InitializeDiffChar()
 	" set types of difference matching colors from available highlights
 	let t:DChar.dmc = ["DiffText"]
 	if t:DiffColors == 1
-		let t:DChar.dmc += ["DiffDelete", "WildMenu", "VisualNOS"]
+		let t:DChar.dmc += ["NonText", "Search", "VisualNOS"]
 	elseif t:DiffColors == 2
-		let t:DChar.dmc += ["DiffDelete", "WildMenu", "TabLine",
-			\"ErrorMsg", "DiffAdd", "VisualNOS", "Conceal"]
+		let t:DChar.dmc += ["NonText", "Search", "VisualNOS",
+			\"ErrorMsg", "MoreMsg", "TabLine", "Title"]
 	elseif t:DiffColors == 3
-		let t:DChar.dmc += ["ModeMsg", "DiffDelete", "Title",
-			\"WildMenu", "CursorLineNr", "TabLine", "NonText",
-			\"ErrorMsg", "StatusLine", "DiffAdd", "WarningMsg",
-			\"VisualNOS", "MoreMsg", "Conceal", "SpecialKey"]
+		let t:DChar.dmc += ["NonText", "Search", "VisualNOS",
+			\"ErrorMsg", "MoreMsg", "TabLine", "Title",
+			\"StatusLine", "WarningMsg", "Conceal", "SpecialKey",
+			\"ColorColumn", "ModeMsg", "SignColumn", "CursorLineNr"]
 	elseif t:DiffColors == 100
 		redir => hl | silent highlight | redir END
 		let h = map(filter(split(hl, '\n'),
 			\'v:val =~ "^\\S" && v:val =~ "="'), 'split(v:val)[0]')
+		unlet h[index(h, "DiffAdd")]
+		unlet h[index(h, "DiffDelete")]
 		unlet h[index(h, "DiffChange")]
 		unlet h[index(h, "DiffText")]
 		unlet h[index(h, hlexists("Cursor") ? "Cursor" : "MatchParen")]
@@ -273,11 +287,13 @@ function! s:InitializeDiffChar()
 
 	" set a difference unit updating on this tab page
 	" and a record of line string values
-	if v:version >= 704
+	if exists("##TextChanged") && exists("##TextChangedI")
 		if !exists("t:DiffUpdate")
 			let t:DiffUpdate = g:DiffUpdate
 		endif
-		let t:DChar.lsv = {}
+		if t:DiffUpdate
+			let t:DChar.lsv = {}
+		endif
 	endif
 
 	exec cwin . "wincmd w"
@@ -340,9 +356,10 @@ function! s:ResetDiffChar(sline, eline)
 		" when no highlight exists, reset events
 		if empty(t:DChar.hlc[k])
 			exec "au! BufWinLeave <buffer=" . buf . ">"
-			if v:version >= 704 && t:DiffUpdate
+			if exists("t:DChar.lsv")
 				exec "au! TextChanged <buffer=" . buf . ">"
 				exec "au! TextChangedI <buffer=" . buf . ">"
+				unlet t:DChar.lsv[k]
 			endif
 			call s:ResetDiffCharPair(k)
 		endif
@@ -438,10 +455,22 @@ function! s:ShowDiffChar(sline, eline)
 								\+ [['=', '']]
 			let m = len(unit)
 			if edit == '='
-				if !empty(h1) || !empty(h2)
-					let c1 += [h1] | let h1 = []
-					let c2 += [h2] | let h2 = []
+				if !empty(h1)
+					if !empty(h2)
+						let c1 += [['c', h1]]
+						let c2 += [['c', h2]]
+					else
+						let c1 += [['a', h1]]
+						let c2 += [['d', [l2, l2 + 1]]]
+					endif
+				else
+					if !empty(h2)
+						let c1 += [['d', [l1, l1 + 1]]]
+						let c2 += [['a', h2]]
+					endif
 				endif
+				let h1 = []
+				let h2 = []
 				let l1 += m
 				let l2 += m
 			elseif edit == '-'
@@ -468,7 +497,7 @@ function! s:ShowDiffChar(sline, eline)
 				exec "au BufWinLeave <buffer=" . buf .
 					\"> call s:ResetDiffChar(1, line('$'))"
 			endif
-			if v:version >= 704 && t:DiffUpdate
+			if exists("t:DChar.lsv")
 				if !exists("#TextChanged#<buffer=" . buf . ">")
 					exec "au TextChanged <buffer=" . buf .
 						\"> call s:UpdateDiffChar("
@@ -497,7 +526,7 @@ function! s:GetLineStrValues(key)
 	let lsv = []
 	for l in range(1, line('$'))
 		if index(hl, l) != -1
-			let str = getline(l)
+			let str = getbufline(t:DChar.buf[a:key], l)[0]
 			let val = 0
 			for n in range(len(str))
 				let val += char2nr(str[n]) * (n + 1)
@@ -571,22 +600,31 @@ function! s:ClearDiffChar(key, lines)
 	endfor
 endfunction
 
-function! s:HighlightDiffChar(key, lncol)
-	let nc = len(t:DChar.dmc)
-	for [line, col] in items(a:lncol)
-		if !has_key(t:DChar.mid[a:key], line)
-			let dl = '\%' . line . 'l'
-			let mid = [matchadd("DiffChange", dl . '.', 0)]
-			for i in range(len(col))
-				let c = col[i]
-				if empty(c) | continue | endif
-				let dc = '\%>' . (c[0] - 1) . 'c\%<' .
-							\(c[-1] + 1) . 'c'
-				let mid += [matchadd(t:DChar.dmc[i % nc],
-								\dl . dc, 0)]
+function! s:HighlightDiffChar(key, lnecol)
+	for [l, ec] in items(a:lnecol)
+		if !has_key(t:DChar.mid[a:key], l)
+			"if exists("*matchaddpos")
+				"let mid = [matchaddpos("DiffChange", [[l]], 0)]
+			"else
+				let dl = '\%' . l . 'l'
+				let mid = [matchadd("DiffChange", dl . '.', 0)]
+			"endif
+			for i in range(len(ec))
+				let [e, c] = ec[i]
+				if e == 'd' | continue | endif
+				let hl = (e == 'a') ? "DiffAdd" :
+					\t:DChar.dmc[i % len(t:DChar.dmc)]
+				"if exists("*matchaddpos")
+					"let mid += [matchaddpos(hl,
+						"\[[l, c[0], len(c)]], 0)]
+				"else
+					let dc = '\%>' . (c[0] - 1) . 'c\%<' .
+						\(c[-1] + 1) . 'c'
+					let mid += [matchadd(hl, dl . dc, 0)]
+				"endif
 			endfor
-			let t:DChar.mid[a:key][line] = mid
-			let t:DChar.hlc[a:key][line] = col
+			let t:DChar.mid[a:key][l] = mid
+			let t:DChar.hlc[a:key][l] = ec
 		endif
 	endfor
 endfunction
@@ -610,14 +648,15 @@ function! s:JumpDiffChar(dir, pos)
 				let c = col('.')
 				if !a:pos
 					" end pos workaround for multibyte char
-					let c += len(matchstr(getline(l), '.',
-								\c - 1)) - 1
+					let c += len(matchstr(getbufline(
+						\cbuf, l)[0], '.', c - 1)) - 1
 				endif
 			else
 				let c = a:dir ? 0 : 99999
 			endif
 			let hc = map(copy(t:DChar.hlc[k][l]),
-				\'empty(v:val) ? "" : v:val[a:pos ? 0 : -1]')
+						\'(v:val[0] == "d") ?
+						\"" : v:val[1][a:pos ? 0 : -1]')
 			if !a:dir
 				let c = - c
 				call map(reverse(hc),
@@ -651,26 +690,54 @@ function! s:ShowDiffCharPair(key, line, icol, pos)
 		let line = a:line
 	endif
 
-	exec bufwinnr(t:DChar.buf[m]) . "wincmd w"
-	call s:ResetDiffCharPair(m)
-	let col = t:DChar.hlc[m][line][a:icol]
-	if empty(col)
-		echo "No matching unit exists!"
+	let ln = getbufline(t:DChar.buf[m], line)[0]
+	if t:DChar.hlc[m][line][a:icol][0] == 'd'
+		" deleted unit
+		let cp = t:DChar.hlc[m][line][a:icol][1][0]
+		let pc = (0 < cp) ? split(ln[ : cp - 1], '\zs')[-1] : ""
+		let nc = (cp < len(ln)) ? split(ln[cp : ], '\zs')[0] : ""
+		" echo a-----b with DiffChange/DiffDelete
+		echohl DiffChange
+		echon pc
+		echohl DiffDelete
+		let col = t:DChar.hlc[a:key][a:line][a:icol][1]
+		echon repeat('-', strwidth(getbufline(t:DChar.buf[a:key],
+					\a:line)[0][col[0] - 1 : col[-1] - 1]))
+		echohl DiffChange
+		echon nc
+		echohl None
+		" set position/length for both side of deleted unit
+		let clen = len(pc . nc)
+		let cpos = cp - len(pc) + 1
 	else
-		let cu = getline(line)[col[0] - 1 : col[-1] - 1]
-		" end pos workaround for multibyte char
-		let c = a:pos ? col[0] : col[- len(split(cu, '\zs')[-1])]
-		let t:DChar.mpc[m] =
-			\matchadd(hlexists("Cursor") ? "Cursor" : "MatchParen",
-					\'\%' . line . 'l\%' . c . 'c', 0)
-		if !exists("#WinEnter<buffer=" . t:DChar.buf[m] . ">")
-			exec "au WinEnter <buffer=" . t:DChar.buf[m] .
-				\"> call s:ResetDiffCharPair(" . m . ")"
-		endif
+		" changed unit
+		let col = t:DChar.hlc[m][line][a:icol][1]
+		let dc = ln[col[0] - 1 : col[-1] - 1]
 		" echo the matching unit with its color
 		exec "echohl " . t:DChar.dmc[a:icol % len(t:DChar.dmc)]
-		echo cu
+		echon dc
 		echohl None
+		" set position/length for matching unit
+		let clen = len(split(dc, '\zs')[a:pos ? 0 : -1])
+		let cpos = col[a:pos ? 0 : - clen]
+	endif
+
+	" show cursor on deleted unit or matching unit on another window
+	exec bufwinnr(t:DChar.buf[m]) . "wincmd w"
+	call s:ResetDiffCharPair(m)
+	"if exists("*matchaddpos")
+		"let t:DChar.mpc[m] = matchaddpos(
+			"\hlexists("Cursor") ? "Cursor" : "MatchParen",
+			"\[[line, cpos, clen]], 0)
+	"else
+		let t:DChar.mpc[m] = matchadd(
+			\hlexists("Cursor") ? "Cursor" : "MatchParen",
+			\'\%' . line . 'l\%>' . (cpos - 1) . 'c\%<' .
+			\(cpos + clen) . 'c', 0)
+	"endif
+	if !exists("#WinEnter<buffer=" . t:DChar.buf[m] . ">")
+		exec "au WinEnter <buffer=" . t:DChar.buf[m] .
+			\"> call s:ResetDiffCharPair(" . m . ")"
 	endif
 	exec bufwinnr(t:DChar.buf[a:key]) . "wincmd w"
 endfunction
@@ -682,7 +749,7 @@ function! s:ResetDiffCharPair(key)
 		call matchdelete(t:DChar.mpc[a:key])
 		unlet t:DChar.mpc[a:key]
 		exec "au! WinEnter <buffer=" . t:DChar.buf[a:key] . ">"
-		echo
+		echon ""
 	endif
 endfunction
 
