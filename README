@@ -28,6 +28,10 @@ Sample keymaps:
 
 This script has been always positively supporting mulltibyte characters.
 
+Update : 4.4
+* Enhanced to follow diffopt's icase and iwhite options for both diff and non-diff modes (ignorecase option is not used). Previously, it has been always case and space/tab sensitive.
+* Implemented to highlight the difference units using a new matchaddpos() function, introduced in 7.4.330, when available to draw faster.
+
 Update : 4.3 
 * Enhanced to differently show added/deleted/changed difference units with original diff highlightings. 
 - added units will be always highlighted with DiffAdd. 

@@ -32,6 +32,13 @@
 "
 " This script has been always positively supporting mulltibyte characters.
 "
+" Update : 4.4
+" * Enhanced to follow diffopt's icase and iwhite options for both diff and
+"   non-diff modes (ignorecase option is not used). Previously, it has been
+"   always case and space/tab sensitive.
+" * Implemented to highlight the difference units using a new matchaddpos()
+"   function, introduced in 7.4.330, when available to draw faster.
+"
 " Update : 4.3
 "  Enhanced to differently show added/deleted/changed difference units
 "  with original diff highlightings.
@@ -125,15 +132,15 @@
 "   the initial version.
 "
 " Author: Rick Howe
-" Last Change: 2014/07/03
+" Last Change: 2014/07/21
 " Created:
 " Requires:
-" Version: 4.3
+" Version: 4.4
 
 if exists("g:loaded_diffchar")
 	finish
 endif
-let g:loaded_diffchar = 4.3
+let g:loaded_diffchar = 4.4
 
 let s:save_cpo = &cpo
 set cpo&vim
@@ -215,6 +222,10 @@ function! s:InitializeDiffChar()
 		endif
 	endfor
 
+	" set ignorecase and ignorespace flags
+	let t:DChar.igc = (&diffopt =~ "icase")	
+	let t:DChar.igs = (&diffopt =~ "iwhite")
+
 	" set line and its highlight id record
 	let t:DChar.mid = {}
 	let t:DChar.mid[1] = {}
@@ -230,9 +241,10 @@ function! s:InitializeDiffChar()
 		let t:DiffUnit = g:DiffUnit
 	endif
 	if t:DiffUnit == "Char"		" any single character
-		let t:DChar.spt = '\zs'
+		let t:DChar.spt = t:DChar.igs ? '\(\s\+\|.\)\zs' : '\zs'
 	elseif t:DiffUnit == "Word1"	" \w\+ word and any \W character
-		let t:DChar.spt = '\(\w\+\|\W\)\zs'
+		let t:DChar.spt = t:DChar.igs ? '\(\s\+\|\w\+\|\W\)\zs' :
+							\'\(\w\+\|\W\)\zs'
 	elseif t:DiffUnit == "Word2"	" non-space and space words
 		let t:DChar.spt = '\(\s\+\|\S\+\)\zs'
 	elseif t:DiffUnit == "Word3"	" \< or \> boundaries
@@ -241,7 +253,7 @@ function! s:InitializeDiffChar()
 		let s = substitute(t:DiffUnit, '^CSV(\(.\+\))$', '\1', '')
 		let t:DChar.spt = '\(\([^\'. s . ']\+\)\|\' . s . '\)\zs'
 	else
-		let t:DChar.spt = '\zs'
+		let t:DChar.spt = t:DChar.igs ? '\(\s\+\|.\)\zs' : '\zs'
 		echo 'Not a valid difference unit type. Use "Char" instead.'
 	endif
 
@@ -421,40 +433,52 @@ function! s:ShowDiffChar(sline, eline)
 		let n2 = n1
 	endif
 
+	" set ignorecase flag
+	let save_igc = &ignorecase
+	let &ignorecase = t:DChar.igc
+
 	" a list of different lines and columns
 	let lc1 = {}
 	let lc2 = {}
 
 	" compare each line and trace difference units
 	for n in range(n1)
-		if t1[n] ==# t2[n] | continue | endif
-
 		" split each line to the difference units
 		let u1 = split(t1[n], t:DChar.spt)
 		let u2 = split(t2[n], t:DChar.spt)
 
+		" set unit lists for tracing
+		let u1t = copy(u1)
+		let u2t = copy(u2)
+		if t:DChar.igs
+			" convert \s\+ to a single space on ignorespace mode
+			call map(u1t, 'substitute(v:val, "\\s\\+", " ", "g")')
+			call map(u2t, 'substitute(v:val, "\\s\\+", " ", "g")')
+		endif
+		if u1t == u2t | continue | endif
+
 		" find first/last same units and get them out to trace
-		let ns = min([len(u1), len(u2)])
+		let ns = min([len(u1t), len(u2t)])
 		let fu = 0
-		while fu < ns && u1[fu] ==# u2[fu]
+		while fu < ns && u1t[fu] == u2t[fu]
 			let fu += 1
 		endwhile
 		let ns -= fu
 		let lu = -1
-		while lu >= -ns && u1[lu] ==# u2[lu]
+		while lu >= -ns && u1t[lu] == u2t[lu]
 			let lu -= 1
 		endwhile
-		let fsu = (fu == 0) ? [] : u1[:fu - 1]	" 1st same units
-		let u1d = u1[fu : lu]	" actual difference units in u1
-		let u2d = u2[fu : lu]	" actual difference units in u2
+		let u1t = u1t[fu : lu]
+		let u2t = u2t[fu : lu]
 
 		" trace the actual diffference units
-		let c1 = [] | let h1 = [] | let l1 = len(join(fsu, ''))
-		let c2 = [] | let h2 = [] | let l2 = len(join(fsu, ''))
-		for [edit, unit] in s:TraceDiffChar{t:DiffAlgorithm}(u1d, u2d)
-								\+ [['=', '']]
-			let m = len(unit)
-			if edit == '='
+		let l1 = (fu == 0) ? 0 : len(join(u1[: fu - 1], ''))
+		let l2 = (fu == 0) ? 0 : len(join(u2[: fu - 1], ''))
+		let c1 = [] | let h1 = [] | let p1 = fu
+		let c2 = [] | let h2 = [] | let p2 = fu
+		for [ed, ut] in s:TraceDiffChar{t:DiffAlgorithm}(u1t, u2t)
+								\+ [['*', '']]
+			if ed == '=' || ed == '*'
 				if !empty(h1)
 					if !empty(h2)
 						let c1 += [['c', h1]]
@@ -469,23 +493,36 @@ function! s:ShowDiffChar(sline, eline)
 						let c2 += [['a', h2]]
 					endif
 				endif
-				let h1 = []
-				let h2 = []
-				let l1 += m
-				let l2 += m
-			elseif edit == '-'
-				let h1 += range(l1 + 1, l1 + m)
-				let l1 += m
-			elseif edit == '+'
-				let h2 += range(l2 + 1, l2 + m)
-				let l2 += m
+				if ed == '='
+					let h1 = []
+					let h2 = []
+					let l1 += len(u1[p1])
+					let l2 += len(u2[p2])
+					let p1 += 1
+					let p2 += 1
+				endif
+			elseif ed == '-'
+				let ul = len(u1[p1])
+				let h1 += range(l1 + 1, l1 + ul)
+				let l1 += ul
+				let p1 += 1
+			elseif ed == '+'
+				let ul = len(u2[p2])
+				let h2 += range(l2 + 1, l2 + ul)
+				let l2 += ul
+				let p2 += 1
 			endif
 		endfor
 
 		" add different lines and columns to the list
-		let lc1[d1[n]] = c1
-		let lc2[d2[n]] = c2
+		if !empty(c1) || !empty(c2)
+			let lc1[d1[n]] = c1
+			let lc2[d2[n]] = c2
+		endif
 	endfor
+
+	" restore ignorecase flag
+	let &ignorecase = save_igc
 
 	" highlight lines and columns and set events
 	for k in [1, 2]
@@ -603,25 +640,25 @@ endfunction
 function! s:HighlightDiffChar(key, lnecol)
 	for [l, ec] in items(a:lnecol)
 		if !has_key(t:DChar.mid[a:key], l)
-			"if exists("*matchaddpos")
-				"let mid = [matchaddpos("DiffChange", [[l]], 0)]
-			"else
+			if exists("*matchaddpos")
+				let mid = [matchaddpos("DiffChange", [[l]], 0)]
+			else
 				let dl = '\%' . l . 'l'
 				let mid = [matchadd("DiffChange", dl . '.', 0)]
-			"endif
+			endif
 			for i in range(len(ec))
 				let [e, c] = ec[i]
 				if e == 'd' | continue | endif
 				let hl = (e == 'a') ? "DiffAdd" :
 					\t:DChar.dmc[i % len(t:DChar.dmc)]
-				"if exists("*matchaddpos")
-					"let mid += [matchaddpos(hl,
-						"\[[l, c[0], len(c)]], 0)]
-				"else
+				if exists("*matchaddpos")
+					let mid += [matchaddpos(hl,
+						\[[l, c[0], len(c)]], 0)]
+				else
 					let dc = '\%>' . (c[0] - 1) . 'c\%<' .
 						\(c[-1] + 1) . 'c'
 					let mid += [matchadd(hl, dl . dc, 0)]
-				"endif
+				endif
 			endfor
 			let t:DChar.mid[a:key][l] = mid
 			let t:DChar.hlc[a:key][l] = ec
@@ -725,16 +762,16 @@ function! s:ShowDiffCharPair(key, line, icol, pos)
 	" show cursor on deleted unit or matching unit on another window
 	exec bufwinnr(t:DChar.buf[m]) . "wincmd w"
 	call s:ResetDiffCharPair(m)
-	"if exists("*matchaddpos")
-		"let t:DChar.mpc[m] = matchaddpos(
-			"\hlexists("Cursor") ? "Cursor" : "MatchParen",
-			"\[[line, cpos, clen]], 0)
-	"else
+	if exists("*matchaddpos")
+		let t:DChar.mpc[m] = matchaddpos(
+			\hlexists("Cursor") ? "Cursor" : "MatchParen",
+			\[[line, cpos, clen]], 0)
+	else
 		let t:DChar.mpc[m] = matchadd(
 			\hlexists("Cursor") ? "Cursor" : "MatchParen",
 			\'\%' . line . 'l\%>' . (cpos - 1) . 'c\%<' .
 			\(cpos + clen) . 'c', 0)
-	"endif
+	endif
 	if !exists("#WinEnter<buffer=" . t:DChar.buf[m] . ">")
 		exec "au WinEnter <buffer=" . t:DChar.buf[m] .
 			\"> call s:ResetDiffCharPair(" . m . ")"
@@ -794,7 +831,7 @@ function! s:TraceDiffCharONP(u1, u2)
 				let ed = '-'
 			endif
 			let y = x - k
-			while x < M && y < N && u1[x] ==# u2[y]
+			while x < M && y < N && u1[x] == u2[y]
 				let x += 1
 				let y += 1
 				let ed .= '='
@@ -865,7 +902,7 @@ function! s:TraceDiffCharOND(u1, u2)
 				let ed = '-'
 			endif
 			let y = x - k
-			while x < n1 && y < n2 && a:u1[x] ==# a:u2[y]
+			while x < n1 && y < n2 && a:u1[x] == a:u2[y]
 				let x += 1
 				let y += 1
 				let ed .= '='
@@ -919,30 +956,27 @@ function! s:TraceDiffCharBasic(u1, u2)
 	if n1 == 0 && n2 == 0 | return [] | endif
 
 	" initialize an edit graph [next edit, # of steps to goal]
-	let egraph = []
+	let egph = []
 	for i in range(n1 + 1)
-		let egraph += [repeat([['', 0]], n2 + 1)]
+		let egph += [repeat([['', 0]], n2 + 1)]
 	endfor
 
-	" assign values in egraph[] based on u1 and u2
-	let egraph[n1][n2] = ['*', 0]		" last point = goal
+	" assign values in egph[] based on u1 and u2
+	let egph[n1][n2] = ['*', 0]		" last point = goal
 	for i in range(n1)			" last column's points
-		let egraph[i][n2] = ['-', n1 - i]
+		let egph[i][n2] = ['-', n1 - i]
 	endfor
 	for j in range(n2)			" last row's points
-		let egraph[n1][j] = ['+', n2 - j]
+		let egph[n1][j] = ['+', n2 - j]
 	endfor
 	for i in range(n1 - 1, 0, -1)		" other points from goal
 		for j in range(n2 - 1, 0, -1)
-			if a:u1[i] ==# a:u2[j]
-				let egraph[i][j] =
-						\['=', egraph[i + 1][j + 1][1]]
-			elseif egraph[i + 1][j][1] < egraph[i][j + 1][1]
-				let egraph[i][j] =
-						\['-', egraph[i + 1][j][1] + 1]
+			if a:u1[i] == a:u2[j]
+				let egph[i][j] = ['=', egph[i + 1][j + 1][1]]
+			elseif egph[i + 1][j][1] < egph[i][j + 1][1]
+				let egph[i][j] = ['-', egph[i + 1][j][1] + 1]
 			else
-				let egraph[i][j] =
-						\['+', egraph[i][j + 1][1] + 1]
+				let egph[i][j] = ['+', egph[i][j + 1][1] + 1]
 			endif
 		endfor
 	endfor
@@ -953,7 +987,7 @@ function! s:TraceDiffCharBasic(u1, u2)
 	let i = 0
 	let j = 0
 	while 1
-		let edit = egraph[i][j][0]
+		let edit = egph[i][j][0]
 		if edit == '='
 			let unit = a:u1[i]
 			let i += 1
