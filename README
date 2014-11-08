@@ -14,19 +14,47 @@ then this script will narrow down the DiffText area:
      (file A) The <|swift brown|> fox jumped over the <|lazy|> dog.
      (file B) The <|lazy|> fox jumped over the <|swift brown|> dog.
 
-Sample commands:
-:[range]SDChar (Highlight DiffChar for [range])
-:[range]RDChar (Reset DiffChar for [range])
+Sample commands
+:[range]SDChar - Highlight difference units for [range]
+:[range]RDChar - Reset the highlight of difference units for [range]
 
-Sample keymaps:
-<F7> (for all lines and toggle the DiffChar highlight)
-<F8> (for current line and toggle the DiffChar highlight)
-[b (jump to the start position of the previous DiffChar unit)
-]b (jump to the start position of the next DiffChar unit)
-[e (jump to the end position of the previous DiffChar unit)
-]e (jump to the end position of the next DiffChar unit)
+Sample keymaps
+<F7> - toggle the highlight/reset of difference units for all lines
+<F8> - toggle the highlight/reset of difference units for current line
+[b   - jump cursor to the start position of the previous difference unit
+]b   - jump cursor to the start position of the next difference unit
+[e   - jump cursor to the end position of the previous difference unit
+]e   - jump cursor to the end position of the next difference unit
+
+Global variables (and tab local variables when using t:)
+g:DiffUnit - type of difference unit
+    "Char"   : any single character (default)
+    "Word1"  : \w\+ word and any \W single character
+    "Word2"  : non-space and space words
+    "Word3"  : \< or \> character class boundaries
+    "CSV(,)" : separated by a character such as ',', ';', and '\t'
+g:DiffColors - matching colors for changed unit pairs
+    0   : always DiffText (default)
+    1   : 4 colors in fixed order
+    2   : 8 colors in fixed order
+    3   : 16 colors in fixed order
+    100 : all available colors in dynamic random order
+        (notes : always DiffAdd for added units)
+g:DiffUpdate - interactively updating of highlightings while editing
+    0 : disable (default)
+    1 : enable
+      (notes : available on vim 7.4)
+g:DiffAlgorithm - difference algorithm
+    "ONP"   : S.Wu, U.Manber, G.Myers and W.Miller,
+              "An O(NP) Sequence Comparison Algorithm" (default)
+    "OND"   : E.W.Myers, "An O(ND) Difference Algorithm and Its Variations"
+    "Basic" : basic algorithm using edit graph and shortest edit distance
 
 This script has been always positively supporting mulltibyte characters.
+
+Update : 4.5
+* Fixed to trace the differences until the end of the units. Previously the last same units were skipped, so last added units were sometimes shown as changed ones (eg: the last "swift brown" on above were shown as changed units but now shows "brown" as added ones).
+* Enhanced to use your global variables if defined in vimrc.
 
 Update : 4.4
 * Enhanced to follow diffopt's icase and iwhite options for both diff and non-diff modes (ignorecase option is not used). Previously, it has been always case and space/tab sensitive.

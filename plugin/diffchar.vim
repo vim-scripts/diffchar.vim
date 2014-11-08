@@ -1,4 +1,4 @@
-" diffchar.vim - Highlight the differences, based on characters and words
+" diffchar.vim - Highlight the exact differences, based on characters and words
 "
 " This script has been developed in order to make diff mode more useful.
 " DiffText does not show the exact difference, but this script will
@@ -18,19 +18,50 @@
 "      (file A) The <|swift brown|> fox jumped over the <|lazy|> dog.
 "      (file B) The <|lazy|> fox jumped over the <|swift brown|> dog.
 "
-" Sample commands:
-" :[range]SDChar (Highlight DiffChar for [range])
-" :[range]RDChar (Reset DiffChar for [range])
+" Sample commands
+" :[range]SDChar - Highlight difference units for [range]
+" :[range]RDChar - Reset the highlight of difference units for [range]
 "
-" Sample keymaps:
-" <F7> (for all lines and toggle the DiffChar highlight)
-" <F8> (for current line and toggle the DiffChar highlight)
-" [b (jump to the start position of the previous DiffChar unit)
-" ]b (jump to the start position of the next DiffChar unit)
-" [e (jump to the end position of the previous DiffChar unit)
-" ]e (jump to the end position of the next DiffChar unit)
+" Sample keymaps
+" <F7> - toggle the highlight/reset of difference units for all lines
+" <F8> - toggle the highlight/reset of difference units for current line
+" [b   - jump cursor to the start position of the previous difference unit
+" ]b   - jump cursor to the start position of the next difference unit
+" [e   - jump cursor to the end position of the previous difference unit
+" ]e   - jump cursor to the end position of the next difference unit
+"
+" Global variables (and tab local variables when using t:)
+" g:DiffUnit - type of difference unit
+"     "Char"   : any single character (default)
+"     "Word1"  : \w\+ word and any \W single character
+"     "Word2"  : non-space and space words
+"     "Word3"  : \< or \> character class boundaries
+"     "CSV(,)" : separated by a character such as ',', ';', and '\t'
+" g:DiffColors - matching colors for changed unit pairs
+"     0   : always DiffText (default)
+"     1   : 4 colors in fixed order
+"     2   : 8 colors in fixed order
+"     3   : 16 colors in fixed order
+"     100 : all available colors in dynamic random order
+"         (notes : always DiffAdd for added units)
+" g:DiffUpdate - interactively updating of highlightings while editing
+"     0 : disable (default)
+"     1 : enable
+"       (notes : available on vim 7.4)
+" g:DiffAlgorithm - difference algorithm
+"     "ONP"   : S.Wu, U.Manber, G.Myers and W.Miller,
+"               "An O(NP) Sequence Comparison Algorithm" (default)
+"     "OND"   : E.W.Myers, "An O(ND) Difference Algorithm and Its Variations"
+"     "Basic" : basic algorithm using edit graph and shortest edit distance
 "
 " This script has been always positively supporting mulltibyte characters.
+"
+" Update : 4.5
+" * Fixed to trace the differences until the end of the units. Previously
+"   the last same units were skipped, so last added units were sometimes shown
+"   as changed ones (eg: the last "swift brown" on above were shown as changed
+"   units but now shows "brown" as added ones).
+" * Enhanced to use your global variables if defined in vimrc.
 "
 " Update : 4.4
 " * Enhanced to follow diffopt's icase and iwhite options for both diff and
@@ -132,15 +163,15 @@
 "   the initial version.
 "
 " Author: Rick Howe
-" Last Change: 2014/07/21
+" Last Change: 2014/11/08
 " Created:
 " Requires:
-" Version: 4.4
+" Version: 4.5
 
 if exists("g:loaded_diffchar")
 	finish
 endif
-let g:loaded_diffchar = 4.4
+let g:loaded_diffchar = 4.5
 
 let s:save_cpo = &cpo
 set cpo&vim
@@ -158,29 +189,37 @@ nnoremap <silent> [e :call <SID>JumpDiffChar(0, 0)<CR>
 nnoremap <silent> ]e :call <SID>JumpDiffChar(1, 0)<CR>
 
 " Set a difference unit type
+if !exists("g:DiffUnit")
 let g:DiffUnit = "Char"		" any single character
 " let g:DiffUnit = "Word1"	" \w\+ word and any \W single character
 " let g:DiffUnit = "Word2"	" non-space and space words
 " let g:DiffUnit = "Word3"	" \< or \> character class boundaries
 " let g:DiffUnit = "CSV(,)"	" character separated by (,;\t)
+endif
 
 " Set a difference unit matching colors
+if !exists("g:DiffColors")
 let g:DiffColors = 0		" always 1 color
 " let g:DiffColors = 1		" 4 colors in fixed order
 " let g:DiffColors = 2		" 8 colors in fixed order
 " let g:DiffColors = 3		" 16 colors in fixed order
 " let g:DiffColors = 100	" all available colors in dynamic random order
+endif
 
 " Set a difference unit updating while editing
+if !exists("g:DiffUpdate")
 if exists("##TextChanged") && exists("##TextChangedI")
 let g:DiffUpdate = 0		" disable
 " let g:DiffUpdate = 1		" enable
 endif
+endif
 
 " Set a difference algorithm
+if !exists("g:DiffAlgorithm")
 let g:DiffAlgorithm = "ONP"
 " let g:DiffAlgorithm = "OND"
 " let g:DiffAlgorithm = "Basic"
+endif
 
 function! s:InitializeDiffChar()
 	if min(tabpagebuflist()) == max(tabpagebuflist())
@@ -457,19 +496,14 @@ function! s:ShowDiffChar(sline, eline)
 		endif
 		if u1t == u2t | continue | endif
 
-		" find first/last same units and get them out to trace
+		" get first same units out to trace
 		let ns = min([len(u1t), len(u2t)])
 		let fu = 0
 		while fu < ns && u1t[fu] == u2t[fu]
 			let fu += 1
 		endwhile
-		let ns -= fu
-		let lu = -1
-		while lu >= -ns && u1t[lu] == u2t[lu]
-			let lu -= 1
-		endwhile
-		let u1t = u1t[fu : lu]
-		let u2t = u2t[fu : lu]
+		let u1t = u1t[fu :]
+		let u2t = u2t[fu :]
 
 		" trace the actual diffference units
 		let l1 = (fu == 0) ? 0 : len(join(u1[: fu - 1], ''))
@@ -797,12 +831,12 @@ function! s:TraceDiffCharONP(u1, u2)
 	if n1 == 0 && n2 == 0 | return [] | endif
 
 	" reverse to be N <= M, u2 <= u1
-	if n1 >= n2
-		let reverse = 0
+	let rev = (n1 > n2) ? 0 : (n1 < n2) ? 1 :
+				\(join(a:u1, '') >= join(a:u2, '')) ? 0 : 1
+	if rev == 0
 		let M = n1 | let N = n2
 		let u1 = a:u1 | let u2 = a:u2
 	else
-		let reverse = 1
 		let M = n2 | let N = n1
 		let u1 = a:u2 | let u2 = a:u1
 	endif
@@ -870,7 +904,7 @@ function! s:TraceDiffCharONP(u1, u2)
 		endif
 		let ses[n] = [edit, unit]
 	endfor
-	if reverse		" reverse the edit
+	if rev			" reverse the edit
 		call map(ses, '[tr(v:val[0], "+-", "-+"), v:val[1]]')
 	endif
 
@@ -882,6 +916,15 @@ function! s:TraceDiffCharOND(u1, u2)
 	let n1 = len(a:u1)
 	let n2 = len(a:u2)
 	if n1 == 0 && n2 == 0 | return [] | endif
+
+	" reverse to be u2 <= u1
+	let rev = (n1 > n2) ? 0 : (n1 < n2) ? 1 :
+				\(join(a:u1, '') >= join(a:u2, '')) ? 0 : 1
+	if rev == 0
+		let u1 = a:u1 | let u2 = a:u2
+	else
+		let u1 = a:u2 | let u2 = a:u1
+	endif
 
 	let offset = n1 + n2
 	let V = repeat([0], offset * 2 + 1)
@@ -902,7 +945,7 @@ function! s:TraceDiffCharOND(u1, u2)
 				let ed = '-'
 			endif
 			let y = x - k
-			while x < n1 && y < n2 && a:u1[x] == a:u2[y]
+			while x < n1 && y < n2 && u1[x] == u2[y]
 				let x += 1
 				let y += 1
 				let ed .= '='
@@ -933,18 +976,21 @@ function! s:TraceDiffCharOND(u1, u2)
 	for n in range(len(eseq))
 		let edit = eseq[n]
 		if edit == '='
-			let unit = a:u1[i]
+			let unit = u1[i]
 			let i += 1
 			let j += 1
 		elseif edit == '-'
-			let unit = a:u1[i]
+			let unit = u1[i]
 			let i += 1
 		elseif edit == '+'
-			let unit = a:u2[j]
+			let unit = u2[j]
 			let j += 1
 		endif
 		let ses[n] = [edit, unit]
 	endfor
+	if rev			" reverse the edit
+		call map(ses, '[tr(v:val[0], "+-", "-+"), v:val[1]]')
+	endif
 
 	return ses
 endfunction
@@ -954,6 +1000,15 @@ function! s:TraceDiffCharBasic(u1, u2)
 	let n1 = len(a:u1)
 	let n2 = len(a:u2)
 	if n1 == 0 && n2 == 0 | return [] | endif
+
+	" reverse to be u2 <= u1
+	let rev = (n1 > n2) ? 0 : (n1 < n2) ? 1 :
+				\(join(a:u1, '') >= join(a:u2, '')) ? 0 : 1
+	if rev == 0
+		let u1 = a:u1 | let u2 = a:u2
+	else
+		let u1 = a:u2 | let u2 = a:u1
+	endif
 
 	" initialize an edit graph [next edit, # of steps to goal]
 	let egph = []
@@ -971,7 +1026,7 @@ function! s:TraceDiffCharBasic(u1, u2)
 	endfor
 	for i in range(n1 - 1, 0, -1)		" other points from goal
 		for j in range(n2 - 1, 0, -1)
-			if a:u1[i] == a:u2[j]
+			if u1[i] == u2[j]
 				let egph[i][j] = ['=', egph[i + 1][j + 1][1]]
 			elseif egph[i + 1][j][1] < egph[i][j + 1][1]
 				let egph[i][j] = ['-', egph[i + 1][j][1] + 1]
@@ -989,20 +1044,23 @@ function! s:TraceDiffCharBasic(u1, u2)
 	while 1
 		let edit = egph[i][j][0]
 		if edit == '='
-			let unit = a:u1[i]
+			let unit = u1[i]
 			let i += 1
 			let j += 1
 		elseif edit == '-'
-			let unit = a:u1[i]
+			let unit = u1[i]
 			let i += 1
 		elseif edit == '+'
-			let unit = a:u2[j]
+			let unit = u2[j]
 			let j += 1
 		elseif edit == '*'
 			break
 		endif
 		let ses += [[edit, unit]]
 	endwhile
+	if rev			" reverse the edit
+		call map(ses, '[tr(v:val[0], "+-", "-+"), v:val[1]]')
+	endif
 
 	return ses
 endfunction
