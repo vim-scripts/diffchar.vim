@@ -56,6 +56,12 @@
 "
 " This script has been always positively supporting mulltibyte characters.
 "
+" Update : 4.6
+" * Fixed to correctly show the colors of changed units in one-by-one defined
+"   order of g:DiffColors. Since an added unit was improperly counted as
+"   changed one, some colors were skipped and not shown. The first changed
+"   unit is now always highlighted with DiffText in any color mode.
+"
 " Update : 4.5
 " * Fixed to trace the differences until the end of the units. Previously
 "   the last same units were skipped, so last added units were sometimes shown
@@ -163,15 +169,15 @@
 "   the initial version.
 "
 " Author: Rick Howe
-" Last Change: 2014/11/08
+" Last Change: 2014/11/25
 " Created:
 " Requires:
-" Version: 4.5
+" Version: 4.6
 
 if exists("g:loaded_diffchar")
 	finish
 endif
-let g:loaded_diffchar = 4.5
+let g:loaded_diffchar = 4.6
 
 let s:save_cpo = &cpo
 set cpo&vim
@@ -506,45 +512,38 @@ function! s:ShowDiffChar(sline, eline)
 		let u2t = u2t[fu :]
 
 		" trace the actual diffference units
+		let c1 = [] | let h1 = []
+		let c2 = [] | let h2 = []
 		let l1 = (fu == 0) ? 0 : len(join(u1[: fu - 1], ''))
 		let l2 = (fu == 0) ? 0 : len(join(u2[: fu - 1], ''))
-		let c1 = [] | let h1 = [] | let p1 = fu
-		let c2 = [] | let h2 = [] | let p2 = fu
+		let cu = 0	" changed units counter
+		let au = 0	" added/deleted units counter
 		for [ed, ut] in s:TraceDiffChar{t:DiffAlgorithm}(u1t, u2t)
-								\+ [['*', '']]
-			if ed == '=' || ed == '*'
-				if !empty(h1)
-					if !empty(h2)
-						let c1 += [['c', h1]]
-						let c2 += [['c', h2]]
-					else
-						let c1 += [['a', h1]]
-						let c2 += [['d', [l2, l2 + 1]]]
-					endif
-				else
-					if !empty(h2)
-						let c1 += [['d', [l1, l1 + 1]]]
-						let c2 += [['a', h2]]
-					endif
+								\+ [['=', '']]
+			let ul = len(ut)
+			if ed == '='
+				let ee = [empty(h1), empty(h2)]
+				if ee == [0, 0]
+					let c1 += [['c', cu, h1]]
+					let c2 += [['c', cu, h2]]
+					let cu += 1
+				elseif ee == [0, 1]
+					let c1 += [['a', au, h1]]
+					let c2 += [['d', au, [l2, l2 + 1]]]
+					let au += 1
+				elseif ee == [1, 0]
+					let c1 += [['d', au, [l1, l1 + 1]]]
+					let c2 += [['a', au, h2]]
+					let au += 1
 				endif
-				if ed == '='
-					let h1 = []
-					let h2 = []
-					let l1 += len(u1[p1])
-					let l2 += len(u2[p2])
-					let p1 += 1
-					let p2 += 1
-				endif
+				let h1 = [] | let l1 += ul
+				let h2 = [] | let l2 += ul
 			elseif ed == '-'
-				let ul = len(u1[p1])
 				let h1 += range(l1 + 1, l1 + ul)
 				let l1 += ul
-				let p1 += 1
 			elseif ed == '+'
-				let ul = len(u2[p2])
 				let h2 += range(l2 + 1, l2 + ul)
 				let l2 += ul
-				let p2 += 1
 			endif
 		endfor
 
@@ -672,7 +671,7 @@ function! s:ClearDiffChar(key, lines)
 endfunction
 
 function! s:HighlightDiffChar(key, lnecol)
-	for [l, ec] in items(a:lnecol)
+	for [l, enc] in items(a:lnecol)
 		if !has_key(t:DChar.mid[a:key], l)
 			if exists("*matchaddpos")
 				let mid = [matchaddpos("DiffChange", [[l]], 0)]
@@ -680,11 +679,10 @@ function! s:HighlightDiffChar(key, lnecol)
 				let dl = '\%' . l . 'l'
 				let mid = [matchadd("DiffChange", dl . '.', 0)]
 			endif
-			for i in range(len(ec))
-				let [e, c] = ec[i]
+			for [e, n, c] in enc
 				if e == 'd' | continue | endif
 				let hl = (e == 'a') ? "DiffAdd" :
-					\t:DChar.dmc[i % len(t:DChar.dmc)]
+					\t:DChar.dmc[n % len(t:DChar.dmc)]
 				if exists("*matchaddpos")
 					let mid += [matchaddpos(hl,
 						\[[l, c[0], len(c)]], 0)]
@@ -695,7 +693,7 @@ function! s:HighlightDiffChar(key, lnecol)
 				endif
 			endfor
 			let t:DChar.mid[a:key][l] = mid
-			let t:DChar.hlc[a:key][l] = ec
+			let t:DChar.hlc[a:key][l] = enc
 		endif
 	endfor
 endfunction
@@ -727,7 +725,7 @@ function! s:JumpDiffChar(dir, pos)
 			endif
 			let hc = map(copy(t:DChar.hlc[k][l]),
 						\'(v:val[0] == "d") ?
-						\"" : v:val[1][a:pos ? 0 : -1]')
+						\"" : v:val[2][a:pos ? 0 : -1]')
 			if !a:dir
 				let c = - c
 				call map(reverse(hc),
@@ -760,18 +758,18 @@ function! s:ShowDiffCharPair(key, line, icol, pos)
 	else				" non-diff mode
 		let line = a:line
 	endif
+	let bl = getbufline(t:DChar.buf[m], line)[0]
 
-	let ln = getbufline(t:DChar.buf[m], line)[0]
-	if t:DChar.hlc[m][line][a:icol][0] == 'd'
+	let [e, n, c] = t:DChar.hlc[m][line][a:icol]
+	if e == 'd'
 		" deleted unit
-		let cp = t:DChar.hlc[m][line][a:icol][1][0]
-		let pc = (0 < cp) ? split(ln[ : cp - 1], '\zs')[-1] : ""
-		let nc = (cp < len(ln)) ? split(ln[cp : ], '\zs')[0] : ""
+		let pc = (0 < c[0]) ? split(bl[ : c[0] - 1], '\zs')[-1] : ""
+		let nc = (c[0] < len(bl)) ? split(bl[c[0] : ], '\zs')[0] : ""
 		" echo a-----b with DiffChange/DiffDelete
 		echohl DiffChange
 		echon pc
 		echohl DiffDelete
-		let col = t:DChar.hlc[a:key][a:line][a:icol][1]
+		let col = t:DChar.hlc[a:key][a:line][a:icol][2]
 		echon repeat('-', strwidth(getbufline(t:DChar.buf[a:key],
 					\a:line)[0][col[0] - 1 : col[-1] - 1]))
 		echohl DiffChange
@@ -779,18 +777,17 @@ function! s:ShowDiffCharPair(key, line, icol, pos)
 		echohl None
 		" set position/length for both side of deleted unit
 		let clen = len(pc . nc)
-		let cpos = cp - len(pc) + 1
+		let cpos = c[0] - len(pc) + 1
 	else
 		" changed unit
-		let col = t:DChar.hlc[m][line][a:icol][1]
-		let dc = ln[col[0] - 1 : col[-1] - 1]
+		let dc = bl[c[0] - 1 : c[-1] - 1]
 		" echo the matching unit with its color
-		exec "echohl " . t:DChar.dmc[a:icol % len(t:DChar.dmc)]
+		exec "echohl " .  t:DChar.dmc[n % len(t:DChar.dmc)]
 		echon dc
 		echohl None
 		" set position/length for matching unit
 		let clen = len(split(dc, '\zs')[a:pos ? 0 : -1])
-		let cpos = col[a:pos ? 0 : - clen]
+		let cpos = c[a:pos ? 0 : - clen]
 	endif
 
 	" show cursor on deleted unit or matching unit on another window
