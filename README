@@ -1,30 +1,40 @@
 This is a mirror of http://www.vim.org/scripts/script.php?script_id=4932
 
-This script has been developed in order to make diff mode more useful. DiffText does not show the exact difference, but this script will highlight its difference, character by character - so called DiffChar.
+This plugin has been developed in order to make diff mode more useful. DiffText does not show the exact difference, but this plugin will highlight its difference, character by character - so called DiffChar.
 
-Use this script just after diff command. DiffText area will be narrowed down to show the DiffChar. You can use this script in non-diff'ed usual mode as well.
+Use this plugin just after diff command. DiffText area will be narrowed down to show the DiffChar. You can use this plugin in non-diff usual mode as well.
 
 For example, diff command shows: (<|DiffText area|>)
 
      (file A) The <|swift brown fox jumped over the lazy|> dog.
      (file B) The <|lazy fox jumped over the swift brown|> dog.
 
-then this script will narrow down the DiffText area:
+then this plugin will narrow down the DiffText area:
 
      (file A) The <|swift brown|> fox jumped over the <|lazy|> dog.
      (file B) The <|lazy|> fox jumped over the <|swift brown|> dog.
+
+Since update 4.7, vim is able to automatically show the exact differences on diff mode.
+
+This plugin has been always positively supporting mulltibyte characters.
 
 Sample commands
 :[range]SDChar - Highlight difference units for [range]
 :[range]RDChar - Reset the highlight of difference units for [range]
 
-Sample keymaps
-<F7> - toggle the highlight/reset of difference units for all lines
-<F8> - toggle the highlight/reset of difference units for current line
-[b   - jump cursor to the start position of the previous difference unit
-]b   - jump cursor to the start position of the next difference unit
-[e   - jump cursor to the end position of the previous difference unit
-]e   - jump cursor to the end position of the next difference unit
+Configurable sample keymaps
+<Plug>ToggleDiffCharAllLines (default: <F7>)
+    toggle the highlight/reset of difference units for all lines
+<Plug>ToggleDiffCharCurrentLine (default: <F8>)
+    toggle the highlight/reset of difference units for current line
+<Plug>JumpDiffCharPrevStart (default: [b)
+    jump cursor to the start position of the previous difference unit
+<Plug>JumpDiffCharNextStart (default: ]b)
+    jump cursor to the start position of the next difference unit
+<Plug>JumpDiffCharPrevEnd (default: [e)
+    jump cursor to the end position of the previous difference unit
+<Plug>JumpDiffCharNextEnd (default: ]e)
+    jump cursor to the end position of the next difference unit
 
 Global variables (and tab local variables when using t:)
 g:DiffUnit - type of difference unit
@@ -50,7 +60,12 @@ g:DiffAlgorithm - difference algorithm
     "OND"   : E.W.Myers, "An O(ND) Difference Algorithm and Its Variations"
     "Basic" : basic algorithm using edit graph and shortest edit distance
 
-This script has been always positively supporting mulltibyte characters.
+DiffCharExpr(int, sed) function for the diffexpr option
+    int : 1 = use internal diff algorithm, 0 = external diff command
+    sed : 1 = initially show exact differences, 0 = original inexact ones
 
-Update : 4.6
-* Fixed to correctly show the colors of changed units in one-by-one defined order of g:DiffColors. Since an added unit was improperly counted as changed one, some colors were skipped and not shown. The first changed unit is now always highlighted with DiffText in any color mode.
+Update : 4.7
+* Enhanced to set DiffCharExpr() to the diffexpr option, if it is empty. When diff mode begins, vim calls this function which finds differences by this plugin's internal diff algorithm (default) and then initially shows the exact differences (default). You can also explicitly set this function to the option with different arguments.
+* Enhanced to make the key mappings configurable. For example, the default <F7> can be modified by:
+       nmap <silent> "your favorite key" <Plug>ToggleDiffCharAllLines
+* Fixed to correctly adjust the position of difference units when diffopt's iwhite option is enabled.
