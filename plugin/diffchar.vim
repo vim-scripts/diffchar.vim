@@ -70,6 +70,9 @@
 "          else = threshold value of differences to apply either
 "     exd: 1 = initially show exact differences, 0 = vim original ones
 "
+" Update : 4.81
+" * Enhanced to make DiffCharExpr() a bit faster by using uniq() or so.
+"
 " Update : 4.8
 " * Enhanced to set the threshold value on DiffCharExpr() to check how many
 "   differences and then apply either of internal algorithm or external diff
@@ -206,15 +209,15 @@
 "   the initial version.
 "
 " Author: Rick Howe
-" Last Change: 2015/01/12
+" Last Change: 2015/01/13
 " Created:
 " Requires:
-" Version: 4.8
+" Version: 4.81
 
 if exists("g:loaded_diffchar")
 	finish
 endif
-let g:loaded_diffchar = 4.8
+let g:loaded_diffchar = 4.81
 
 let s:save_cpo = &cpo
 set cpo&vim
@@ -309,25 +312,38 @@ function! DiffCharExpr(iet, exd)
 		return
 	endif
 
-	" check how many differences between f1 and f2
+	" decide either internal or external
 	if a:iet > 1
-		for k in [1, 2]
-			let d{k} = {}
-			for s in f{k}
-				if !empty(s) | let d{k}[s] = 0 | endif
-			endfor
-		endfor
-		" compare with a:iet and apply either
-		let iet = (- len(d1) - len(d2) + len(extend(d1, d2)) * 2)
-							\< a:iet ? 1 : 0
+		" too short to check
+		if len(f1 + f2) < a:iet
+			let int = 1
+		else
+			" check how many differences and compare with a:iet
+			if exists("*uniq")
+				let int = (2 * len(uniq(sort(f1 + f2))) -
+					\len(uniq(sort(copy(f1)))) -
+					\len(uniq(sort(copy(f2))))) < a:iet
+			else
+				for k in [1, 2]
+					let d{k} = {}
+					for s in f{k}
+						let d{k}[empty(s) ?
+							\nr2char(10) : s] = 0
+					endfor
+				endfor
+				let int = (- len(d1) - len(d2) + 2 *
+					\len(extend(d1, d2, "keep"))) < a:iet
+			endif
+		endif
 	else
-		let iet = a:iet
+		let int = a:iet
 	endif
-	" get diff commands from internal or external
-	let dfcmd = iet ?
+
+	" get a list of diff commands
+	let dfcmd = int ?
 		\s:ApplyIntDiffAlgorithm(f1, f2) : s:ApplyExtDiffCommand()
 
-	" write a list of diff commands
+	" write to output file
 	call writefile(dfcmd, v:fname_out)
 
 	" return if no need to show exact differences
@@ -352,7 +368,7 @@ function! DiffCharExpr(iet, exd)
 	if s:InitializeDiffChar() == -1 | return | endif
 
 	" check which window is v:fname_in/v:fname_new and
-	" set those window ids and replaced lines
+	" set those window numbers and replaced lines
 	let t:DChar.win = {}
 	let t:DChar.vdl = {}
 	for w in range(1, winnr('$'))
