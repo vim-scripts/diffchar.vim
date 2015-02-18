@@ -65,10 +65,16 @@
 "     "OND"   : E.W.Myers, "An O(ND) Difference Algorithm and Its Variations"
 "     "Basic" : basic algorithm using edit graph and shortest edit distance
 "
-" DiffCharExpr(iet, exd) function for the diffexpr option
-"     iet: 1 = internal algorithm, 0 = external diff command,
-"          else = threshold value of differences to apply either
+" DiffCharExpr(mxi, exd) function for the diffexpr option
+"     mxi: the maximum number of total lines of both windows to apply internal
+"          algorithm, apply external diff command when more lines
 "     exd: 1 = initially show exact differences, 0 = vim original ones
+"
+" Update : 4.9
+" * Fixed DiffCharExpr() to check the number of total lines, not different
+"   lines only, of both windows and apply either internal algorithm or
+"   external diff command, in order to keep the appropriate performance
+"   for large files.
 "
 " Update : 4.81
 " * Enhanced to make DiffCharExpr() a bit faster by using uniq() or so.
@@ -209,15 +215,15 @@
 "   the initial version.
 "
 " Author: Rick Howe
-" Last Change: 2015/01/13
+" Last Change: 2015/02/18
 " Created:
 " Requires:
-" Version: 4.81
+" Version: 4.9
 
 if exists("g:loaded_diffchar")
 	finish
 endif
-let g:loaded_diffchar = 4.81
+let g:loaded_diffchar = 4.9
 
 let s:save_cpo = &cpo
 set cpo&vim
@@ -294,15 +300,12 @@ endif
 " Set a diff expression
 if !exists("g:DiffExpr") || g:DiffExpr
 if empty(&diffexpr)
-let &diffexpr = "DiffCharExpr(200, 1)"	" set threshold and show exact diffs
-" let &diffexpr = "DiffCharExpr(1, 1)"	" apply int algo and show exact diffs
-" let &diffexpr = "DiffCharExpr(1, 0)"	" apply int algo and show vim original
-" let &diffexpr = "DiffCharExpr(0, 1)"	" apply ext cmd and show exact diffs
+let &diffexpr = "DiffCharExpr(200, 1)"	" set # of lines and show exact diffs
 " let &diffexpr = "DiffCharExpr(0, 0)"	" apply ext cmd and show vim original
 endif
 endif
 
-function! DiffCharExpr(iet, exd)
+function! DiffCharExpr(mxi, exd)
 	" read both files to be diff traced
 	let [f1, f2] = [readfile(v:fname_in), readfile(v:fname_new)]
 
@@ -312,35 +315,8 @@ function! DiffCharExpr(iet, exd)
 		return
 	endif
 
-	" decide either internal or external
-	if a:iet > 1
-		" too short to check
-		if len(f1 + f2) < a:iet
-			let int = 1
-		else
-			" check how many differences and compare with a:iet
-			if exists("*uniq")
-				let int = (2 * len(uniq(sort(f1 + f2))) -
-					\len(uniq(sort(copy(f1)))) -
-					\len(uniq(sort(copy(f2))))) < a:iet
-			else
-				for k in [1, 2]
-					let d{k} = {}
-					for s in f{k}
-						let d{k}[empty(s) ?
-							\nr2char(10) : s] = 0
-					endfor
-				endfor
-				let int = (- len(d1) - len(d2) + 2 *
-					\len(extend(d1, d2, "keep"))) < a:iet
-			endif
-		endif
-	else
-		let int = a:iet
-	endif
-
 	" get a list of diff commands
-	let dfcmd = int ?
+	let dfcmd = (len(f1 + f2) <= a:mxi) ?
 		\s:ApplyIntDiffAlgorithm(f1, f2) : s:ApplyExtDiffCommand()
 
 	" write to output file

@@ -60,10 +60,12 @@ g:DiffAlgorithm - difference algorithm
     "OND"   : E.W.Myers, "An O(ND) Difference Algorithm and Its Variations"
     "Basic" : basic algorithm using edit graph and shortest edit distance
 
-DiffCharExpr(iet, exd) function for the diffexpr option
-    iet: 1 = internal algorithm, 0 = external diff command,
-          else = threshold value of differences to apply either
+DiffCharExpr(mxi, exd) function for the diffexpr option
+    mxi: the maximum number of total lines of both windows to apply internal algorithm, apply external diff command when more lines
     exd: 1 = initially show exact differences, 0 = vim original ones
+
+Update : 4.9
+* Fixed DiffCharExpr() to check the number of total lines, not different lines only, of both windows and apply either internal algorithm or external diff command, in order to keep the appropriate performance for large files.
 
 Update : 4.81
 * Enhanced to make DiffCharExpr() a bit faster by using uniq() or so.
@@ -71,5 +73,10 @@ Update : 4.81
 Update : 4.8
 * Enhanced to set the threshold value on DiffCharExpr() to check how many differences and then apply either of internal algorithm or external diff command. The default for diffexpr option using DiffCharExpr() is changed to use this threshold, 200 - apply internal if less than 200 differences, apply external if more.
 * Changed the way to select windows when more than 2 windows in the page.
-  - automatically select the diff mode's next (wincmd w) window, if any, in addition to the current window 
+  - automatically select the diff mode's next (wincmd w) window, if any, in addition to the current window
   - can select any of splitted windows as vim can do for diff
+
+Update : 4.7
+* Enhanced to set DiffCharExpr() to the diffexpr option, if it is empty. When diff mode begins, vim calls this function which finds differences by this plugin's internal diff algorithm (default) and then initially shows the exact differences (default). You can also explicitly set this function to the option with different arguments.
+* Enhanced to make the key mappings configurable. For example, the default <F7> can be modified by: nmap <silent> "your favorite key" <Plug>ToggleDiffCharAllLines
+* Fixed to correctly adjust the position of difference units when diffopt's iwhite option is enabled.
