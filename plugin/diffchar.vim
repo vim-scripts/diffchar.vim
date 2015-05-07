@@ -18,16 +18,32 @@
 "      (file A) The <|swift brown|> fox jumped over the <|lazy|> dog.
 "      (file B) The <|lazy|> fox jumped over the <|swift brown|> dog.
 "
-" Since update 4.7, vim is able to automatically show the exact differences
-" on diff mode.
+" Since update 4.7, this plugin has set the DiffCharExpr() to the diffexpr
+" option, if it is empty. This function would be useful for smaller files.
+" If the total number of lines on both diff windows <= 200, by default,
+" it applies the internal difference algorithm to make the diff faster.
+" And, by default, it initially shows the exact differences for all lines
+" whenever diff mode begins. You can change these arguments of this function
+" like "set diffexpr=DiffCharExpr(100, 0)", but if prefer not to use this
+" enhancement, set g:DiffExpr = 0.
+"
+" Until update 5.0, this plugin has always traced the exact differences.
+" But for long and less-similar files and lines, it may take time to complete.
+" At 5.0, the g:DiffMaxRatio global (and tabpage) variable, which is an
+" assumption of how much % the differences exist at a maximum, is introduced.
+" Once the difference ratio actually exceeds g:DiffMaxRatio while tracing,
+" this plugin recursively splits the tracing at that unit and then joins each
+" results. Its default is 100%, meaning it still finds the exact differences
+" as before. Try to decrease this ratio if performance is more important than
+" diff accuracy.
 "
 " This plugin has been always positively supporting mulltibyte characters.
 "
-" Sample commands
+" Commands
 " :[range]SDChar - Highlight difference units for [range]
 " :[range]RDChar - Reset the highlight of difference units for [range]
 "
-" Configurable sample keymaps
+" Configurable Keymaps
 " <Plug>ToggleDiffCharAllLines (default: <F7>)
 "     toggle the highlight/reset of difference units for all lines
 " <Plug>ToggleDiffCharCurrentLine (default: <F8>)
@@ -41,13 +57,13 @@
 " <Plug>JumpDiffCharNextEnd (default: ]e)
 "     jump cursor to the end position of the next difference unit
 "
-" Global variables (and tab local variables when using t:)
+" Global Variables (and Tabpage variables when using t:)
 " g:DiffUnit - type of difference unit
 "     "Char"   : any single character (default)
 "     "Word1"  : \w\+ word and any \W single character
 "     "Word2"  : non-space and space words
 "     "Word3"  : \< or \> character class boundaries
-"     "CSV(,)" : separated by a character such as ',', ';', and '\t'
+"     "CSV(,)" : separated by characters such as ',', ';', and '\t'
 " g:DiffColors - matching colors for changed unit pairs
 "     0   : always DiffText (default)
 "     1   : 4 colors in fixed order
@@ -59,16 +75,25 @@
 "     0 : disable (default)
 "     1 : enable
 "       (notes : available on vim 7.4)
-" g:DiffAlgorithm - difference algorithm
-"     "ONP"   : S.Wu, U.Manber, G.Myers and W.Miller,
-"               "An O(NP) Sequence Comparison Algorithm" (default)
-"     "OND"   : E.W.Myers, "An O(ND) Difference Algorithm and Its Variations"
-"     "Basic" : basic algorithm using edit graph and shortest edit distance
+" g:DiffMaxRatio - a maximum difference ratio to trace
+"     0 ~ 100 : (100% as default)
 "
 " DiffCharExpr(mxi, exd) function for the diffexpr option
 "     mxi: the maximum number of total lines of both windows to apply internal
 "          algorithm, apply external diff command when more lines
 "     exd: 1 = initially show exact differences, 0 = vim original ones
+"
+" Update : 5.0
+" * Significantly improved the way to trace and show the differences and
+"   make them 1.5 ~ 2.0 times faster.
+" * Introduced g:DiffMaxRatio (and t:DiffMaxRatio), a maximum difference
+"   ratio to trace (100% as default). Once exceeds, the diff tracing is
+"   recursively split and helps to keep performance instead of diff accuracy.
+" * Discontinued other difference algorithms (OND and Basic) than the ONP,
+"   then g:DiffAlgorithm no longer supported.
+" * Improved to allow to specify one or more characters for "CSV(c)" in
+"   g:DiffUnit (and t:DiffUnit). For example, "CSV(,:\t)" will split the
+"   units by a comma, colon, and tab. Use '\\' for a backslash.
 "
 " Update : 4.9
 " * Fixed DiffCharExpr() to check the number of total lines, not different
@@ -215,24 +240,24 @@
 "   the initial version.
 "
 " Author: Rick Howe
-" Last Change: 2015/02/18
+" Last Change: 2015/05/07
 " Created:
 " Requires:
-" Version: 4.9
+" Version: 5.0
 
 if exists("g:loaded_diffchar")
 	finish
 endif
-let g:loaded_diffchar = 4.9
+let g:loaded_diffchar = 5.0
 
 let s:save_cpo = &cpo
 set cpo&vim
 
-" Sample commands
+" Commands
 command! -range SDChar call s:ShowDiffChar(<line1>, <line2>)
 command! -range RDChar call s:ResetDiffChar(<line1>, <line2>)
 
-" Sample keymaps
+" Configurable Keymaps
 nnoremap <silent> <Plug>ToggleDiffCharAllLines
 				\ :call <SID>ToggleDiffChar(1, line('$'))<CR>
 nnoremap <silent> <Plug>ToggleDiffCharCurrentLine
@@ -270,7 +295,7 @@ let g:DiffUnit = "Char"		" any single character
 " let g:DiffUnit = "Word1"	" \w\+ word and any \W single character
 " let g:DiffUnit = "Word2"	" non-space and space words
 " let g:DiffUnit = "Word3"	" \< or \> character class boundaries
-" let g:DiffUnit = "CSV(,)"	" character separated by (,;\t)
+" let g:DiffUnit = "CSV(,)"	" split characters
 endif
 
 " Set a difference unit matching colors
@@ -290,11 +315,9 @@ let g:DiffUpdate = 0		" disable
 endif
 endif
 
-" Set a difference algorithm
-if !exists("g:DiffAlgorithm")
-let g:DiffAlgorithm = "ONP"
-" let g:DiffAlgorithm = "OND"
-" let g:DiffAlgorithm = "Basic"
+" Set a maximum diff ratio to trace the unit differences
+if !exists("g:DiffMaxRatio")
+let g:DiffMaxRatio = 100	" how much % diffs exist at most
 endif
 
 " Set a diff expression
@@ -349,11 +372,14 @@ function! DiffCharExpr(mxi, exd)
 	let t:DChar.vdl = {}
 	for w in range(1, winnr('$'))
 		if !getwinvar(w, "&diff") | continue | endif
-		if getbufline(winbufnr(w), r1[0]) ==# [f1[r1[0] - 1]]
-			let [t:DChar.win[1], t:DChar.vdl[1]] = [w, r1]
-		elseif getbufline(winbufnr(w), r2[0]) ==# [f2[r2[0] - 1]]
-			let [t:DChar.win[2], t:DChar.vdl[2]] = [w, r2]
-		endif
+		for k in [1, 2]
+			if !has_key(t:DChar.win, k) &&
+				\getbufline(winbufnr(w), r{k}[-1]) ==#
+							\[f{k}[r{k}[-1] - 1]]
+				let [t:DChar.win[k], t:DChar.vdl[k]] = [w, r{k}]
+				break
+			endif
+		endfor
 	endfor
 
 	" highlight the exact differences on the replaced lines
@@ -381,35 +407,23 @@ function! s:ApplyIntDiffAlgorithm(f1, f2)
 
 	" trace the diff lines between f1/f2
 	let dfcmd = []
-	let [d1, d2, l1, l2] = [[], [], 1, 1]
-	let [ex, nu] = ['', 0]
-	for [ed, ut] in s:TraceDiffChar{g:DiffAlgorithm}(f1, f2)
-						\+ [['=', ''], ['', '']]
-		if ex == ed | let nu += 1 | continue | endif
-		if ex == '='
-			let ee = [empty(d1), empty(d2)]
-			if ee == [0, 0]
-				let dfcmd += [((d1[0] == d1[-1]) ?
-					\d1[0] : d1[0] . ',' . d1[-1]) . 'c' .
-					\((d2[0] == d2[-1]) ?
-					\d2[0] : d2[0] . ',' . d2[-1])]
-			elseif ee == [0, 1]
-				let dfcmd += [((d1[0] == d1[-1]) ?
-					\d1[0] : d1[0] . ',' . d1[-1])
-					\. 'd' . (l2 - 1)]
-			elseif ee == [1, 0]
-				let dfcmd += [(l1 - 1) . 'a' .
-					\((d2[0] == d2[-1]) ?
-					\d2[0] : d2[0] . ',' . d2[-1])]
-			endif
-			let [d1, d2] = [[], []]
-			let [l1, l2] += [nu + 1, nu + 1]
-		elseif ex == '-'
-			let [d1, l1] += [[l1, l1 + nu], nu + 1]
-		elseif ex == '+'
-			let [d2, l2] += [[l2, l2 + nu], nu + 1]
+	let [l1, l2] = [1, 1]
+
+	for ed in split(s:TraceDiffChar(f1, f2), '\%(=\+\|[+-]\+\)\zs')
+		let qn = len(ed)
+		if ed[0] == '='		" one or more '='
+			let [l1, l2] += [qn, qn]
+		else			" one or more '[+-]'
+			let q1 = len(escape(ed, '-')) - qn
+			let q2 = qn - q1
+			let dfcmd += [
+				\((q1 == 0) ? (l1 - 1) : (q1 == 1) ?
+					\l1 : l1 . ',' . (l1 + q1 - 1)) .
+				\((q1 == 0) ? 'a' : (q2 == 0) ? 'd' : 'c') .
+				\((q2 == 0) ? (l2 - 1) : (q2 == 1) ?
+					\l2 : l2 . ',' . (l2 + q2 - 1))]
+			let [l1, l2] += [q1, q2]
 		endif
-		let [ex, nu] = [ed, 0]
 	endfor
 
 	" restore ignorecase flag
@@ -460,12 +474,8 @@ function! s:InitializeDiffChar()
 	for k in [1, 2]
 		if getwinvar(t:DChar.win[k], "&diff")
 			exec t:DChar.win[k] . "wincmd w"
-			let t:DChar.vdl[k] = []
-			for l in range(1, line('$'))
-				if index(dh, diff_hlID(l, 1)) != -1
-					let t:DChar.vdl[k] += [l]
-				endif
-			endfor
+			let t:DChar.vdl[k] = filter(range(1, line('$')),
+				\'index(dh, diff_hlID(v:val, 1)) != -1')
 		else
 			unlet t:DChar.vdl
 			break
@@ -490,25 +500,22 @@ function! s:InitializeDiffChar()
 		let t:DiffUnit = g:DiffUnit
 	endif
 	if t:DiffUnit == "Char"		" any single character
-		let t:DChar.spt = t:DChar.igs ? '\(\s\+\|.\)\zs' : '\zs'
+		let t:DChar.spt = t:DChar.igs ? '\%(\s\+\|.\)\zs' : '\zs'
 	elseif t:DiffUnit == "Word1"	" \w\+ word and any \W character
-		let t:DChar.spt = t:DChar.igs ? '\(\s\+\|\w\+\|\W\)\zs' :
-							\'\(\w\+\|\W\)\zs'
+		let t:DChar.spt = t:DChar.igs ? '\%(\s\+\|\w\+\|\W\)\zs' :
+							\'\%(\w\+\|\W\)\zs'
 	elseif t:DiffUnit == "Word2"	" non-space and space words
-		let t:DChar.spt = '\(\s\+\|\S\+\)\zs'
+		let t:DChar.spt = '\%(\s\+\|\S\+\)\zs'
 	elseif t:DiffUnit == "Word3"	" \< or \> boundaries
 		let t:DChar.spt = '\<\|\>'
-	elseif t:DiffUnit =~ '^CSV(.\+)$'	" character separated
-		let s = substitute(t:DiffUnit, '^CSV(\(.\+\))$', '\1', '')
-		let t:DChar.spt = '\(\([^\'. s . ']\+\)\|\' . s . '\)\zs'
+	elseif t:DiffUnit =~ '^CSV(.\+)$'	" split characters
+		let s = escape(t:DiffUnit[4 : -2], '^-]')
+		let t:DChar.spt = '\%([^'. s . ']\+\|[' . s . ']\)\zs'
+	elseif t:DiffUnit =~ '^SRE(.\+)$'	" split regular expression
+		let t:DChar.spt = t:DiffUnit[4 : -2]
 	else
-		let t:DChar.spt = t:DChar.igs ? '\(\s\+\|.\)\zs' : '\zs'
+		let t:DChar.spt = t:DChar.igs ? '\%(\s\+\|.\)\zs' : '\zs'
 		echo 'Not a valid difference unit type. Use "Char" instead.'
-	endif
-
-	" set a difference algorithm on this tab page
-	if !exists("t:DiffAlgorithm")
-		let t:DiffAlgorithm = g:DiffAlgorithm
 	endif
 
 	" set a matching pair cursor id on this tab page
@@ -535,11 +542,10 @@ function! s:InitializeDiffChar()
 		redir => hl | silent highlight | redir END
 		let h = map(filter(split(hl, '\n'),
 			\'v:val =~ "^\\S" && v:val =~ "="'), 'split(v:val)[0]')
-		unlet h[index(h, "DiffAdd")]
-		unlet h[index(h, "DiffDelete")]
-		unlet h[index(h, "DiffChange")]
-		unlet h[index(h, "DiffText")]
-		unlet h[index(h, hlexists("Cursor") ? "Cursor" : "MatchParen")]
+		for c in ["DiffAdd", "DiffDelete", "DiffChange", "DiffText",
+				\hlexists("Cursor") ? "Cursor" : "MatchParen"]
+			unlet h[index(h, c)]
+		endfor
 		while !empty(h)
 			let r = localtime() % len(h)
 			let t:DChar.dmc += [h[r]] | unlet h[r]
@@ -556,6 +562,13 @@ function! s:InitializeDiffChar()
 			let t:DChar.lsv = {}
 		endif
 	endif
+
+	" set a maximum difference ratio for the units
+	if !exists("t:DiffMaxRatio")
+		let t:DiffMaxRatio = g:DiffMaxRatio
+	endif
+	let t:DChar.mxr = t:DiffMaxRatio < 0 ? 0 :
+				\t:DiffMaxRatio > 100 ? 100 : t:DiffMaxRatio
 endfunction
 
 function! s:ShowDiffChar(sl, el)
@@ -579,13 +592,7 @@ function! s:ShowDiffChar(sl, el)
 	" remove already highlighted lines and get those text
 	for k in [1, 2]
 		let hl = map(keys(t:DChar.hlc[k]), 'eval(v:val)')
-		for n in range(len(d{k}))
-			if index(hl, d{k}[n]) != -1
-				let d{k}[n] = -1
-			endif
-		endfor
-		call filter(d{k}, 'v:val != -1')
-
+		call filter(d{k}, 'index(hl, v:val) == -1')
 		let t{k} = []
 		for d in d{k}
 			let t{k} += getbufline(winbufnr(t:DChar.win[k]), d)
@@ -619,13 +626,15 @@ function! s:ShowDiffChar(sl, el)
 
 		" set unit lists for tracing
 		let [u1t, u2t] = [copy(u1), copy(u2)]
+
+		" handle ignorespace option
 		if t:DChar.igs
-			" convert \s\+ to a single space and
-			" remove/unlet the last \s\+$ on ignorespace mode
 			for k in [1, 2]
 				if !empty(u{k}t)
+					" convert \s\+ to a single space
 					call map(u{k}t, 'substitute
 						\(v:val, "\\s\\+", " ", "g")')
+					" remove/unlet the last \s\+$
 					let u{k}t[-1] = substitute
 						\(u{k}t[-1], '\s\+$', '', '')
 					if empty(u{k}t[-1])
@@ -634,62 +643,41 @@ function! s:ShowDiffChar(sl, el)
 				endif
 			endfor
 		endif
+
+		" skip diff tracing if no diff exists
 		if u1t == u2t | continue | endif
 
-		" get first same units out to trace
-		let ns = min([len(u1t), len(u2t)])
-		let fu = 0
-		while fu < ns && u1t[fu] == u2t[fu]
-			let fu += 1
-		endwhile
-		let [u1t, u2t] = [u1t[fu :], u2t[fu :]]
-
-		" trace the actual diffference units
-		let [c1, c2, h1, h2, p1, p2] = [[], [], [], [], fu, fu]
-		let [l1, l2] = (fu == 0) ? [0, 0] :
-						\[len(join(u1[: fu - 1], '')),
-						\len(join(u2[: fu - 1], ''))]
-		let [nc, na] = [0, 0]		" changed and added counts
-		let [ex, nu] = ['', 0]
-		for [ed, ut] in s:TraceDiffChar{t:DiffAlgorithm}(u1t, u2t)
-						\+ [['=', ''], ['', '']]
-			if ex == ed | let nu += 1 | continue | endif
-			if ex == '='
-				let ee = [empty(h1), empty(h2)]
-				if ee == [0, 0]
-					let [c1, c2] += [
-						\[['c', nc, [h1[0], h1[-1]]]],
-						\[['c', nc, [h2[0], h2[-1]]]]]
-					let nc += 1
-				elseif ee == [0, 1]
-					let [c1, c2] += [
-						\[['a', na, [h1[0], h1[-1]]]],
-						\[['d', na, [l2, l2 + 1]]]]
-					let na += 1
-				elseif ee == [1, 0]
-					let [c1, c2] += [
-						\[['d', na, [l1, l1 + 1]]],
-						\[['a', na, [h2[0], h2[-1]]]]]
-					let na += 1
-				endif
-				let [h1, h2] = [[], []]
+		" start diff tracing
+		let [c1, c2, p1, p2, l1, l2] = [[], [], 0, 0, 1, 1]
+		for ed in split(s:TraceDiffChar(u1t, u2t),
+						\'\%(=\+\|[+-]\+\)\zs')
+			let qn = len(ed)
+			if ed[0] == '='		" one or more '='
 				let [l1, l2, p1, p2] += [
-					\len(join(u1[p1 : p1 + nu], '')),
-					\len(join(u2[p2 : p2 + nu], '')),
-					\nu + 1, nu + 1]
-			elseif ex == '-'
-				let ul = len(join(u1[p1 : p1 + nu], ''))
-				let [h1, l1, p1] +=
-					\[[l1 + 1, l1 + ul], ul, nu + 1]
-			elseif ex == '+'
-				let ul = len(join(u2[p2 : p2 + nu], ''))
-				let [h2, l2, p2] +=
-					\[[l2 + 1, l2 + ul], ul, nu + 1]
+					\len(join(u1[p1 : p1 + qn - 1], '')),
+					\len(join(u2[p2 : p2 + qn - 1], '')),
+					\qn, qn]
+			else			" one or more '[+-]'
+				let q1 = len(escape(ed, '-')) - qn
+				let q2 = qn - q1
+				let [e1, e2] = (q1 == 0) ? ['d', 'a'] :
+					\(q2 == 0) ? ['a', 'd'] : ['c', 'c']
+				for k in [1, 2]
+					if q{k} > 0
+						let r = len(join(u{k}[
+							\p{k} : p{k} + q{k} - 1
+							\], ''))
+						let h{k} = [l{k}, l{k} + r - 1]
+						let [l{k}, p{k}] += [r, q{k}]
+					else
+						let h{k} = [l{k} - 1, l{k}]
+					endif
+				endfor
+				let [c1, c2] += [[[e1, h1]], [[e2, h2]]]
 			endif
-			let [ex, nu] = [ed, 0]
 		endfor
 
-		" add different lines and columns to the list
+		" add diff lines and columns to the list
 		if !empty(c1) || !empty(c2)
 			let [lc1[d1[n]], lc2[d2[n]]] = [c1, c2]
 		endif
@@ -749,12 +737,7 @@ function! s:ResetDiffChar(sl, el)
 	for k in [1, 2]
 		" remove not highlighted lines
 		let hl = map(keys(t:DChar.hlc[k]), 'eval(v:val)')
-		for n in range(len(d{k}))
-			if index(hl, d{k}[n]) == -1
-				let d{k}[n] = -1
-			endif
-		endfor
-		call filter(d{k}, 'v:val != -1')
+		call filter(d{k}, 'index(hl, v:val) != -1')
 
 		exec t:DChar.win[k] . "wincmd w"
 		call s:ClearDiffChar(k, d{k})
@@ -797,8 +780,8 @@ function! s:ToggleDiffChar(...)
 	call s:ShowDiffChar(sl, el)
 endfunction
 
-function! s:HighlightDiffChar(key, lnecol)
-	for [l, enc] in items(a:lnecol)
+function! s:HighlightDiffChar(key, lec)
+	for [l, ec] in items(a:lec)
 		if has_key(t:DChar.mid[a:key], l) | continue | endif
 		if exists("*matchaddpos")
 			let mid = [matchaddpos("DiffChange", [[l]], 0)]
@@ -806,29 +789,31 @@ function! s:HighlightDiffChar(key, lnecol)
 			let dl = '\%' . l . 'l'
 			let mid = [matchadd("DiffChange", dl . '.', 0)]
 		endif
-		for [e, n, c] in enc
-			if e == 'd' | continue | endif
-			let hl = (e == 'a') ?
-				\"DiffAdd" : t:DChar.dmc[n % len(t:DChar.dmc)]
+		let n = 0
+		for [e, c] in ec
+			if e == 'c'
+				let hl = t:DChar.dmc[n % len(t:DChar.dmc)]
+				let n += 1
+			elseif e == 'a' | let hl = "DiffAdd"
+			else | continue
+			endif
 			if exists("*matchaddpos")
 				let mid += [matchaddpos(hl,
-					\[[l, c[0], c[-1] - c[0] + 1]], 0)]
+					\[[l, c[0], c[1] - c[0] + 1]], 0)]
 			else
 				let dc = '\%>' . (c[0] - 1) . 'c\%<' .
-							\(c[-1] + 1) . 'c'
+							\(c[1] + 1) . 'c'
 				let mid += [matchadd(hl, dl . dc, 0)]
 			endif
 		endfor
-		let [t:DChar.mid[a:key][l], t:DChar.hlc[a:key][l]] = [mid, enc]
+		let [t:DChar.mid[a:key][l], t:DChar.hlc[a:key][l]] = [mid, ec]
 	endfor
 endfunction
 
 function! s:ClearDiffChar(key, lines)
 	for l in a:lines
 		if has_key(t:DChar.mid[a:key], l)
-			for id in t:DChar.mid[a:key][l]
-				call matchdelete(id)
-			endfor
+			call map(t:DChar.mid[a:key][l], 'matchdelete(v:val)')
 			unlet t:DChar.mid[a:key][l]
 			unlet t:DChar.hlc[a:key][l]
 		endif
@@ -921,8 +906,8 @@ function! s:JumpDiffChar(dir, pos)
 				let c = a:dir ? 0 : 99999
 			endif
 			let hc = map(copy(t:DChar.hlc[k][l]),
-						\'(v:val[0] == "d") ?
-						\"" : v:val[2][a:pos ? 0 : -1]')
+						\'(v:val[0] == "d") ? "" :
+						\v:val[1][a:pos ? 0 : 1]')
 			if !a:dir
 				let c = - c
 				call map(reverse(hc),
@@ -946,7 +931,7 @@ function! s:JumpDiffChar(dir, pos)
 	endwhile
 endfunction
 
-function! s:ShowDiffCharPair(key, line, icol, pos)
+function! s:ShowDiffCharPair(key, line, col, pos)
 	let m = (a:key == 1) ? 2 : 1
 	if exists("t:DChar.vdl")	" diff mode
 		let line = t:DChar.vdl[m][index(t:DChar.vdl[a:key], a:line)]
@@ -955,7 +940,7 @@ function! s:ShowDiffCharPair(key, line, icol, pos)
 	endif
 	let bl = getbufline(winbufnr(t:DChar.win[m]), line)[0]
 
-	let [e, n, c] = t:DChar.hlc[m][line][a:icol]
+	let [e, c] = t:DChar.hlc[m][line][a:col]
 	if e == 'd'
 		" deleted unit
 		let pc = (0 < c[0]) ? split(bl[ : c[0] - 1], '\zs')[-1] : ""
@@ -964,10 +949,10 @@ function! s:ShowDiffCharPair(key, line, icol, pos)
 		echohl DiffChange
 		echon pc
 		echohl DiffDelete
-		let col = t:DChar.hlc[a:key][a:line][a:icol][2]
+		let col = t:DChar.hlc[a:key][a:line][a:col][1]
 		echon repeat('-', strwidth(
 			\getbufline(winbufnr(t:DChar.win[a:key]), a:line)[0]
-						\[col[0] - 1 : col[-1] - 1]))
+						\[col[0] - 1 : col[1] - 1]))
 		echohl DiffChange
 		echon nc
 		echohl None
@@ -976,14 +961,16 @@ function! s:ShowDiffCharPair(key, line, icol, pos)
 		let cpos = c[0] - len(pc) + 1
 	else
 		" changed unit
-		let dc = bl[c[0] - 1 : c[-1] - 1]
+		let dc = bl[c[0] - 1 : c[1] - 1]
 		" echo the matching unit with its color
-		exec "echohl " . t:DChar.dmc[n % len(t:DChar.dmc)]
+		exec "echohl " . t:DChar.dmc[
+			\(count(map(t:DChar.hlc[m][line][: a:col],
+			\'v:val[0]'), 'c') - 1) % len(t:DChar.dmc)]
 		echon dc
 		echohl None
 		" set position/length for matching unit
 		let clen = len(split(dc, '\zs')[a:pos ? 0 : -1])
-		let cpos = a:pos ? c[0] : c[-1] - clen + 1
+		let cpos = a:pos ? c[0] : c[1] - clen + 1
 	endif
 
 	" show cursor on deleted unit or matching unit on another window
@@ -1034,213 +1021,63 @@ function! s:RefreshDiffCharWin()
 	endfor
 endfunction
 
-" O(NP) Difference algorithm
-function! s:TraceDiffCharONP(u1, u2)
-	let [n1, n2] = [len(a:u1), len(a:u2)]
-	if n1 == 0 && n2 == 0 | return [] | endif
+" "An O(NP) Sequence Comparison Algorithm"
+" by S.Wu, U.Manber, G.Myers and W.Miller
+function! s:TraceDiffChar(u1, u2)
+	let [l1, l2] = [len(a:u1), len(a:u2)]
+	if l1 == 0 && l2 == 0 | return ''
+	elseif l1 == 0 | return repeat('+', l2)
+	elseif l2 == 0 | return repeat('-', l1)
+	endif
 
-	" reverse to be N <= M, u2 <= u1
-	let rev = (n1 > n2) ? 0 : (n1 < n2) ? 1 :
-				\(join(a:u1, '') >= join(a:u2, '')) ? 0 : 1
-	let [u1, u2, M, N] = rev ? [a:u2, a:u1, n2, n1] : [a:u1, a:u2, n1, n2]
+	" reverse to be M >= N
+	let [M, N, u1, u2, e1, e2] = (l1 >= l2) ?
+				\[l1, l2, a:u1, a:u2, '+', '-'] :
+				\[l2, l1, a:u2, a:u1, '-', '+']
 
+	let D = M - N
 	let fp = repeat([-1], M + N + 3)
-	let offset = N + 1
-	let delta = M - N
 	let etree = []		" [next edit, previous p, previous k]
 
-	let p = -1
-	while fp[delta + offset] != M
-		let p += 1
-		let etree += [repeat([['', 0, 0]], p * 2 + delta + 1)]
-		for [k, r] in map(range(-p, delta - 1, 1), '[v:val, "A"]')
-			\+ map(range(delta + p, delta + 1, -1), '[v:val, "C"]')
-			\+ [[delta, "B"]]
-			let [x, ed, pp, pk] =
-				\(fp[k - 1 + offset] < fp[k + 1 + offset]) ?
-				\[fp[k + 1 + offset],
-					\'+', (r == 'A') ? p - 1 : p, k + 1] :
-				\[fp[k - 1 + offset] + 1,
-					\'-', (r == 'C') ? p - 1 : p, k - 1]
-			let y = x - k
-			while x < M && y < N && u1[x] == u2[y]
-				let ed .= '='
-				let [x, y] += [1, 1]
-			endwhile
-			let fp[k + offset] = x
-			" add [ed, pp, pk] for current p and k
-			let etree[p][p + k] = [ed, pp, pk]
-		endfor
-	endwhile
+	" set maximum p according to t:DChar.mxr
+	let maxP = exists("t:DChar.mxr") ? N * t:DChar.mxr / 100.0 : N
 
-	" create an edit sequence back from last p and k
-	let eseq = ''
-	while p >= 0 && p + k >= 0
-		let [e, p, k] = etree[p][p + k]
-		let eseq = e . eseq
-	endwhile
-	let eseq = eseq[1:]		" delete the first entry
-
-	" trace the edit sequence starting from [0, 0] and
-	" create a shortest edit script (SES)
-	let ses = []			" ['+/-/=', unit]
-	let [i1, i2] = [0, 0]
-	for n in range(len(eseq))
-		let ed = eseq[n]
-		if ed == '='
-			let ses += [[ed, u1[i1]]]
-			let [i1, i2] += [1, 1]
-		elseif ed == '-'
-			let ses += [[ed, u1[i1]]]
-			let i1 += 1
-		elseif ed == '+'
-			let ses += [[ed, u2[i2]]]
-			let i2 += 1
-		endif
-	endfor
-	if rev				" reverse the edit
-		call map(ses, '[tr(v:val[0], "+-", "-+"), v:val[1]]')
-	endif
-
-	return ses
-endfunction
-
-" O(ND) Difference algorithm
-function! s:TraceDiffCharOND(u1, u2)	
-	let [n1, n2] = [len(a:u1), len(a:u2)]
-	if n1 == 0 && n2 == 0 | return [] | endif
-
-	" reverse to be u2 <= u1
-	let rev = (n1 > n2) ? 0 : (n1 < n2) ? 1 :
-				\(join(a:u1, '') >= join(a:u2, '')) ? 0 : 1
-	let [u1, u2, M, N] = rev ? [a:u2, a:u1, n2, n1] : [a:u1, a:u2, n1, n2]
-
-	let offset = M + N
-	let V = repeat([0], offset * 2 + 1)
-	let etree = []		" [next edit, previous K's position]
-	let found = 0
-
-	for D in range(offset + 1)
-		let etree += [[]]	" add a list for each D
-		for k in range(-D, D, 2)
-			let [x, ed, pk] = (k == -D || k != D &&
-				\V[k - 1 + offset] < V[k + 1 + offset]) ?
-				\[V[k + 1 + offset], '+', k + 1] :
-				\[V[k - 1 + offset] + 1, '-', k - 1]
-			let y = x - k
-			while x < M && y < N && u1[x] == u2[y]
-				let ed .= '='
-				let [x, y] += [1, 1]
-			endwhile
-			let V[k + offset] = x
-			" add [ed, pk] of k for [-D], [-D+2], ..., [D-2], [D]
-			let etree[D] += [[ed, (pk + D - 1)/2]]
-			" find the goal?
-			if x >= M && y >= N | let found = 1 | break | endif
-		endfor
-		if found | break | endif	" break loop
-	endfor
-
-	" create an edit sequence back from last D
-	let eseq = ''	
-	let pk = -1
-	for d in range(D, 0, -1)
-		let [ed, pk] = etree[d][pk]
-		let eseq = ed . eseq
-	endfor
-	let eseq = eseq[1:]		" delete the first entry
-
-	" trace the edit sequence starting from [0, 0] and
-	" create a shortest edit script (SES)
-	let ses = []			" ['+/-/=', unit]
-	let [i1, i2] = [0, 0]
-	for n in range(len(eseq))
-		let ed = eseq[n]
-		if ed == '='
-			let ses += [[ed, u1[i1]]]
-			let [i1, i2] += [1, 1]
-		elseif ed == '-'
-			let ses += [[ed, u1[i1]]]
-			let i1 += 1
-		elseif ed == '+'
-			let ses += [[ed, u2[i2]]]
-			let i2 += 1
-		endif
-	endfor
-	if rev				" reverse the edit
-		call map(ses, '[tr(v:val[0], "+-", "-+"), v:val[1]]')
-	endif
-
-	return ses
-endfunction
-
-" Basic Difference algorithm
-function! s:TraceDiffCharBasic(u1, u2)
-	let [n1, n2] = [len(a:u1), len(a:u2)]
-	if n1 == 0 && n2 == 0 | return [] | endif
-
-	" reverse to be u2 <= u1
-	let rev = (n1 > n2) ? 0 : (n1 < n2) ? 1 :
-				\(join(a:u1, '') >= join(a:u2, '')) ? 0 : 1
-	let [u1, u2, n1, n2] = rev ? [a:u2, a:u1, n2, n1] : [a:u1, a:u2, n1, n2]
-
-	" initialize an edit graph [next edit, # of steps to goal]
-	let egph = []
-	for i1 in range(n1 + 1)
-		let egph += [repeat([['', 0]], n2 + 1)]
-	endfor
-
-	" assign values in egph[] based on u1 and u2
-	let egph[n1][n2] = ['*', 0]		" last point = goal
-	for i1 in range(n1)			" last column's points
-		let egph[i1][n2] = ['-', n1 - i1]
-	endfor
-	for i2 in range(n2)			" last row's points
-		let egph[n1][i2] = ['+', n2 - i2]
-	endfor
-	for i1 in range(n1 - 1, 0, -1)		" other points from goal
-		for i2 in range(n2 - 1, 0, -1)
-			if u1[i1] == u2[i2]
-				let egph[i1][i2] =
-					\['=', egph[i1 + 1][i2 + 1][1]]
-			else
-				let [i1p, i2p] =
-					\[egph[i1 + 1][i2], egph[i1][i2 + 1]]
-				let egph[i1][i2] =
-					\(i1p[1] < i2p[1]) ? ['-', i1p[1] + 1] :
-					\(i1p[1] > i2p[1]) ? ['+', i2p[1] + 1] :
-					\(i1p[0] == '=') ? ['-', i1p[1] + 1] :
-					\(i2p[0] == '=') ? ['+', i2p[1] + 1] :
-					\(i1p[0] == '-' && i2p[0] == '-') ?
-					\['+', i2p[1] + 1] : ['-', i1p[1] + 1]
-			endif
-		endfor
-	endfor
-
-	" trace the next edit starting from [0, 0] and
-	" create a shortest edit script (SES)
-	let ses = []			" ['+/-/=', unit]
-	let [i1, i2] = [0, 0]
+	let ses = ''
+	let p = 0
 	while 1
-		let ed = egph[i1][i2][0]
-		if ed == '='
-			let ses += [[ed, u1[i1]]]
-			let [i1, i2] += [1, 1]
-		elseif ed == '-'
-			let ses += [[ed, u1[i1]]]
-			let i1 += 1
-		elseif ed == '+'
-			let ses += [[ed, u2[i2]]]
-			let i2 += 1
-		elseif ed == '*'
+		let etree += [repeat([['', 0, 0]], p * 2 + D + 1)]
+		for k in range(-p, D - 1, 1) + range(D + p, D + 1, -1) + [D]
+			let [x, etree[p][k]] = (fp[k - 1] < fp[k + 1]) ?
+				\[fp[k + 1],
+					\[e1, k < D ? p - 1 : p, k + 1]] :
+				\[fp[k - 1] + 1,
+					\[e2, k > D ? p - 1 : p, k - 1]]
+			let y = x - k
+			while x < M && y < N && u1[x] == u2[y]
+				let etree[p][k][0] .= '='
+				let [x, y] += [1, 1]
+			endwhile
+			let fp[k] = x
+		endfor
+		if fp[D] == M | break | endif
+		" if p exceeds maxP, split the diff tracing recursively
+		if p > maxP
+			let [u1, u2] = (l1 >= l2) ?
+				\[u1[x :], u2[y :]] : [u2[y :], u1[x :]]
+			let ses = s:TraceDiffChar(u1, u2)
 			break
 		endif
+		let p += 1
 	endwhile
-	if rev				" reverse the edit
-		call map(ses, '[tr(v:val[0], "+-", "-+"), v:val[1]]')
-	endif
 
-	return ses
+	" create a shortest edit script (SES) from last p and k
+	while p != 0 || k != 0
+		let [e, p, k] = etree[p][k]
+		let ses = e . ses
+	endwhile
+	let ses = etree[p][k][0] . ses
+
+	return ses[1:]		" remove the first entry
 endfunction
 
 let &cpo = s:save_cpo

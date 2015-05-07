@@ -14,15 +14,17 @@ then this plugin will narrow down the DiffText area:
      (file A) The <|swift brown|> fox jumped over the <|lazy|> dog.
      (file B) The <|lazy|> fox jumped over the <|swift brown|> dog.
 
-Since update 4.7, vim is able to automatically show the exact differences on diff mode.
+Since update 4.7, this plugin has set the DiffCharExpr() to the diffexpr option, if it is empty. This function would be useful for smaller files. If the total number of lines on both diff windows <= 200, by default, it applies the internal difference algorithm to make the diff faster. And, by default, it initially shows the exact differences for all lines whenever diff mode begins. You can change these arguments of this function like "set diffexpr=DiffCharExpr(100, 0)", but if prefer not to use this enhancement, set g:DiffExpr = 0.
+
+Until update 5.0, this plugin has always traced the exact differences. But for long and less-similar files and lines, it may take time to complete. At 5.0, the g:DiffMaxRatio global (and tabpage) variable, which is an assumption of how much % the differences exist at a maximum, is introduced. Once the difference ratio actually exceeds g:DiffMaxRatio while tracing, this plugin recursively splits the tracing at that unit and then joins each results. Its default is 100%, meaning it still finds the exact differences as before. Try to decrease this ratio if performance is more important than diff accuracy.
 
 This plugin has been always positively supporting mulltibyte characters.
 
-Sample commands
+Commands
 :[range]SDChar - Highlight difference units for [range]
 :[range]RDChar - Reset the highlight of difference units for [range]
 
-Configurable sample keymaps
+Configurable Keymaps
 <Plug>ToggleDiffCharAllLines (default: <F7>)
     toggle the highlight/reset of difference units for all lines
 <Plug>ToggleDiffCharCurrentLine (default: <F8>)
@@ -36,13 +38,13 @@ Configurable sample keymaps
 <Plug>JumpDiffCharNextEnd (default: ]e)
     jump cursor to the end position of the next difference unit
 
-Global variables (and tab local variables when using t:)
+Global Variables (and Tabpage variables when using t:)
 g:DiffUnit - type of difference unit
     "Char"   : any single character (default)
     "Word1"  : \w\+ word and any \W single character
     "Word2"  : non-space and space words
     "Word3"  : \< or \> character class boundaries
-    "CSV(,)" : separated by a character such as ',', ';', and '\t'
+    "CSV(,)" : separated by characters such as ',', ';', and '\t'
 g:DiffColors - matching colors for changed unit pairs
     0   : always DiffText (default)
     1   : 4 colors in fixed order
@@ -54,15 +56,18 @@ g:DiffUpdate - interactively updating of highlightings while editing
     0 : disable (default)
     1 : enable
       (notes : available on vim 7.4)
-g:DiffAlgorithm - difference algorithm
-    "ONP"   : S.Wu, U.Manber, G.Myers and W.Miller,
-              "An O(NP) Sequence Comparison Algorithm" (default)
-    "OND"   : E.W.Myers, "An O(ND) Difference Algorithm and Its Variations"
-    "Basic" : basic algorithm using edit graph and shortest edit distance
+g:DiffMaxRatio - a maximum difference ratio to trace
+    0 ~ 100 : (100% as default)
 
 DiffCharExpr(mxi, exd) function for the diffexpr option
     mxi: the maximum number of total lines of both windows to apply internal algorithm, apply external diff command when more lines
     exd: 1 = initially show exact differences, 0 = vim original ones
+
+Update : 5.0
+* Significantly improved the way to trace and show the differences and make them 1.5 ~ 2.0 times faster.
+* Introduced g:DiffMaxRatio (and t:DiffMaxRatio), a maximum difference ratio to trace (100% as default). Once exceeds, the diff tracing is recursively split and helps to keep performance instead of diff accuracy.
+* Discontinued other difference algorithms (OND and Basic) than the ONP, then g:DiffAlgorithm no longer supported.
+* Improved to allow to specify one or more characters for "CSV(c)" in g:DiffUnit (and t:DiffUnit). For example, "CSV(,:\t)" will split the units by a comma, colon, and tab. Use '\&#039 for a backslash.
 
 Update : 4.9
 * Fixed DiffCharExpr() to check the number of total lines, not different lines only, of both windows and apply either internal algorithm or external diff command, in order to keep the appropriate performance for large files.
@@ -78,5 +83,6 @@ Update : 4.8
 
 Update : 4.7
 * Enhanced to set DiffCharExpr() to the diffexpr option, if it is empty. When diff mode begins, vim calls this function which finds differences by this plugin's internal diff algorithm (default) and then initially shows the exact differences (default). You can also explicitly set this function to the option with different arguments.
-* Enhanced to make the key mappings configurable. For example, the default <F7> can be modified by: nmap <silent> "your favorite key" <Plug>ToggleDiffCharAllLines
+* Enhanced to make the key mappings configurable. For example, the default <F7> can be modified by:
+       nmap <silent> "your favorite key" <Plug>ToggleDiffCharAllLines
 * Fixed to correctly adjust the position of difference units when diffopt's iwhite option is enabled.
