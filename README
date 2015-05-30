@@ -63,6 +63,9 @@ DiffCharExpr(mxi, exd) function for the diffexpr option
     mxi: the maximum number of total lines of both windows to apply internal algorithm, apply external diff command when more lines
     exd: 1 = initially show exact differences, 0 = vim original ones
 
+Update : 5.1
+* Since vim 7.4.682, it has become impossible to overwrite the vim's diff highlights with this plugin. Then, for example, DiffText bold typeface will be left in all the diff highlighted lines (for more info, see https://groups.google.com/forum/?hl=en_US#!topic/vim_use/1jQnbTva2fY). This update provides a workaround to reduce its effect and to show the differences mostly same as before.
+
 Update : 5.0
 * Significantly improved the way to trace and show the differences and make them 1.5 ~ 2.0 times faster.
 * Introduced g:DiffMaxRatio (and t:DiffMaxRatio), a maximum difference ratio to trace (100% as default). Once exceeds, the diff tracing is recursively split and helps to keep performance instead of diff accuracy.
