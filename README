@@ -14,9 +14,9 @@ then this plugin will narrow down the DiffText area:
      (file A) The <|swift brown|> fox jumped over the <|lazy|> dog.
      (file B) The <|lazy|> fox jumped over the <|swift brown|> dog.
 
-Since update 4.7, this plugin has set the DiffCharExpr() to the diffexpr option, if it is empty. This function would be useful for smaller files. If the total number of lines on both diff windows <= 200, by default, it applies the internal difference algorithm to make the diff faster. And, by default, it initially shows the exact differences for all lines whenever diff mode begins. You can change these arguments of this function like "set diffexpr=DiffCharExpr(100, 0)", but if prefer not to use this enhancement, set g:DiffExpr = 0.
+This plugin has been using "An O(NP) Sequence Comparison Algorithm" developed by S.Wu, et al., which always finds an optimum sequence quickly. But for longer lines and less-similar files, it takes time to complete the diff tracing. At update 5.2, this plugin splits the tracing with the diff command. Firstly applies the internal O(NP) algorithm. If not completed within the time specified by a g:DiffSplitTime global (and tabpage) variable, continuously switches to the diff command at that point, and then joins both results. This approach provides a stable performance and reasonable accuracy, because the diff command effectively optimizes between them. The default of its variable is 500 ms, which would be useful for smaller files. If prefer to always apply the internal algorithm for accuracy (or the diff command for performance) only, set some large value (or 0) to the variable.
 
-Until update 5.0, this plugin has always traced the exact differences. But for long and less-similar files and lines, it may take time to complete. At 5.0, the g:DiffMaxRatio global (and tabpage) variable, which is an assumption of how much % the differences exist at a maximum, is introduced. Once the difference ratio actually exceeds g:DiffMaxRatio while tracing, this plugin recursively splits the tracing at that unit and then joins each results. Its default is 100%, meaning it still finds the exact differences as before. Try to decrease this ratio if performance is more important than diff accuracy.
+Since update 4.7, this plugin has set the DiffCharExpr() to the diffexpr option, if it is empty. This function would be useful for smaller files. If the total number of lines on both diff windows <= 200, by default, it applies this plugin's internal algorithm to make the diff faster. And, by default, it initially shows the exact differences for all lines whenever diff mode begins. You can change these arguments of this function like "set diffexpr=DiffCharExpr(100, 0)", but if prefer not to use this enhancement, set 0 to g:DiffExpr.
 
 This plugin has been always positively supporting mulltibyte characters.
 
@@ -56,12 +56,17 @@ g:DiffUpdate - interactively updating of highlightings while editing
     0 : disable (default)
     1 : enable
       (notes : available on vim 7.4)
-g:DiffMaxRatio - a maximum difference ratio to trace
-    0 ~ 100 : (100% as default)
+g:DiffSplitTime - a time length (ms) to apply the internal algorithm first
+    0 ~ : (500 as default)
 
 DiffCharExpr(mxi, exd) function for the diffexpr option
-    mxi: the maximum number of total lines of both windows to apply internal algorithm, apply external diff command when more lines
+    mxi: the maximum number of total lines of both windows to apply internal algorithm, apply diff command when more lines
     exd: 1 = initially show exact differences, 0 = vim original ones
+
+Update : 5.2
+* Enhanced to provide a stable performance even for less-similar long files. The new approach applies this plugin's algorithm first, and if not completed within the specified time, continuously splits the tracing with the diff command, and join both results.
+* Fixed: when diff command does not choose minimal algorithm and it shows the equivalent lines as "changed", this plugin sometimes makes an error.
+* Fixed: if file encoding is not same as buffer encoding, a difference may not be correctly detected in DiffCharExpr().
 
 Update : 5.1
 * Since vim 7.4.682, it has become impossible to overwrite the vim's diff highlights with this plugin. Then, for example, DiffText bold typeface will be left in all the diff highlighted lines (for more info, see https://groups.google.com/forum/?hl=en_US#!topic/vim_use/1jQnbTva2fY). This update provides a workaround to reduce its effect and to show the differences mostly same as before.
