@@ -63,6 +63,9 @@ DiffCharExpr(mxi, exd) function for the diffexpr option
     mxi: the maximum number of total lines of both windows to apply internal algorithm, apply diff command when more lines
     exd: 1 = initially show exact differences, 0 = vim original ones
 
+Update : 5.3
+* Performance improved for long lines and some defects fixed when the diff command is used for the diff tracing.
+
 Update : 5.2
 * Enhanced to provide a stable performance even for less-similar long files. The new approach applies this plugin's algorithm first, and if not completed within the specified time, continuously splits the tracing with the diff command, and join both results.
 * Fixed: when diff command does not choose minimal algorithm and it shows the equivalent lines as "changed", this plugin sometimes makes an error.

@@ -87,6 +87,10 @@
 "          algorithm, apply diff command when more lines
 "     exd: 1 = initially show exact differences, 0 = vim original ones
 "
+" Update : 5.3
+" * Performance improved for long lines and some defects fixed when the diff
+"   command is used for the diff tracing.
+"
 " Update : 5.2
 " * Enhanced to provide a stable performance even for less-similar long files.
 "   The new approach applies this plugin's algorithm first, and if not
@@ -262,15 +266,15 @@
 "   the initial version.
 "
 " Author: Rick Howe
-" Last Change: 2015/08/15
+" Last Change: 2015/09/06
 " Created:
 " Requires:
-" Version: 5.2
+" Version: 5.3
 
 if exists("g:loaded_diffchar")
 	finish
 endif
-let g:loaded_diffchar = 5.2
+let g:loaded_diffchar = 5.3
 
 let s:save_cpo = &cpo
 set cpo&vim
@@ -357,8 +361,17 @@ function! DiffCharExpr(mxi, exd)
 	" find the fist diff trial call and return here
 	if [f1, f2] == [["line1"], ["line2"]]
 		call writefile(["1c1"], v:fname_out)
+		" set an event here to remember window numbers of
+		" v:fname_in (1st) and v:fname_new (2nd)
+		let s:dwin = []
+		au FilterWritePost * let s:dwin += filter(range(1, winnr('$')),
+					\'winbufnr(v:val) == bufnr("%") &&
+						\getwinvar(v:val, "&diff")')
 		return
 	endif
+
+	" reset the event here
+	au! FilterWritePost *
 
 	" get a list of diff commands
 	let dfcmd = (len(f1 + f2) <= a:mxi) ?
@@ -388,33 +401,17 @@ function! DiffCharExpr(mxi, exd)
 	" initialize diffchar
 	if s:InitializeDiffChar() == -1 | return | endif
 
-	" try to find which window is for v:fname_in/v:fname_new
-	let w = filter(range(1, winnr('$')), 'getwinvar(v:val, "&diff")')
-	for w1 in w
-		for w2 in w
-			if w1 == w2 | continue | endif
-			let [b1, b2] =
-				\[getbufline(winbufnr(w1), c1[-1]),
-				\getbufline(winbufnr(w2), c2[-1])]
-			if b1 !=# b2 &&
-				\b1 ==# [iconv(f1[c1[-1] - 1],
-					\getwinvar(w1, "&fileencoding"),
-					\getwinvar(w1, "&encoding"))] &&
-				\b2 ==# [iconv(f2[c2[-1] - 1],
-					\getwinvar(w2, "&fileencoding"),
-					\getwinvar(w2, "&encoding"))]
-				" found and set winnr and changed lines
-				let [t:DChar.win[1], t:DChar.win[2]] = [w1, w2]
-				let [t:DChar.vdl[1], t:DChar.vdl[2]] = [c1, c2]
-				" highlight the changed lines
-				call s:MarkDiffCharID(1)
-				call s:ShowDiffChar(1, line('$'))
-				return
-			endif
-		endfor
-	endfor
-	" not found and clear
-	unlet t:DChar
+	if len(s:dwin) == 2
+		" set window numbers and changed lines
+		let [t:DChar.win[1], t:DChar.win[2]] = [s:dwin[0], s:dwin[1]]
+		let [t:DChar.vdl[1], t:DChar.vdl[2]] = [c1, c2]
+		" highlight the changed lines
+		call s:MarkDiffCharID(1)
+		call s:ShowDiffChar(1, line('$'))
+	else
+		call s:MarkDiffCharID(0)
+		unlet t:DChar
+	endif
 endfunction
 
 function! s:ApplyInternalAlgorithm(f1, f2)
@@ -649,6 +646,7 @@ function! s:ShowDiffChar(sl, el)
 	endfor
 	if n1 == 0
 		let &ignorecase = save_igc
+		call s:MarkDiffCharID(0)
 		unlet t:DChar
 		return
 	endif
@@ -750,7 +748,8 @@ function! s:TraceWithInternalAlgorithm(u1, u2)
 		if u1t == u2t | continue | endif
 
 		" start diff tracing
-		let [c1, c2, p1, p2, l1, l2] = [[], [], 0, 0, 1, 1]
+		let [c1, c2] = [[], []]
+		let [l1, l2, p1, p2] = [1, 1, 0, 0]
 		for ed in split(s:TraceDiffChar(u1t, u2t),
 						\'\%(=\+\|[+-]\+\)\zs')
 			let qn = len(ed)
@@ -773,9 +772,9 @@ function! s:TraceWithInternalAlgorithm(u1, u2)
 						let h{k} = [l{k} - 1, l{k}]
 					endif
 				endfor
-				let [e1, e2] = (q1 == 0) ? ['d', 'a'] :
+				let [r1, r2] = (q1 == 0) ? ['d', 'a'] :
 					\(q2 == 0) ? ['a', 'd'] : ['c', 'c']
-				let [c1, c2] += [[[e1, h1]], [[e2, h2]]]
+				let [c1, c2] += [[[r1, h1]], [[r2, h2]]]
 			endif
 		endfor
 
@@ -816,7 +815,7 @@ function! s:TraceWithDiffCommand(u1, u2)
 	" trace diff output and generate a list of diff's commands per line
 	let dlc = {}
 
-	let hml = 0		" one hunk takes multiple lines or not
+	let hda = []	" a hunk takes multiple lines and includes 'd' or 'a'
 	let [bkd, lnd] = [nr2char(0x1e), nr2char(0x1f)]
 	call map(dfo, '((v:val =~ "^\\d\\+") ? bkd . lnd : lnd) . v:val')
 	for db in split(join(dfo, ''), bkd)
@@ -846,25 +845,29 @@ function! s:TraceWithDiffCommand(u1, u2)
 		endif
 
 		" if multiple lines, separate by lines
-		let hml += 1
 		let lh = []
 		for lx in sort(map(ll, 'printf("%8d", v:val)'))
 			let lx = eval(lx)
 			if index(lh, lx) == -1
 				for k in [1, 2]
-					let h{k} = len(filter(copy(z{k}),
+					let n{k} = len(filter(copy(z{k}),
 						\'v:val =~ "^. " . lx . "\\D"'))
-					let e{k} = s{k} + h{k} - 1
+					let e{k} = s{k} + n{k} - 1
 				endfor
-				if h1 > 0 && h2 > 0
+				if n1 > 0 && n2 > 0
 					let dx = ['c', [s1, e1], [s2, e2]]
-					let [s1, s2] += [h1 + 1, h2 + 1]
-				elseif h1 > 0 && h2 == 0
-					let dx = ['d', [s1, e1], [s2, s2]]
-					let s1 += h1 + 1
-				elseif h1 == 0 && h2 > 0
-					let dx = ['a', [s1, s1], [s2, e2]]
-					let s2 += h2 + 1
+					let [s1, s2] = [e1 + 2, e2 + 2]
+				else
+					if n1 > 0 && n2 == 0
+						let dx = ['d', [s1, e1], []]
+						let s1 = e1 + 2
+					elseif n1 == 0 && n2 > 0
+						let dx = ['a', [], [s2, e2]]
+						let s2 = e2 + 2
+					endif
+					if index(hda, lx) == -1
+						let hda += [lx]
+					endif
 				endif
 				let dlc[lx] = get(dlc, lx, []) + [dx]
 				let lh += [lx]
@@ -872,35 +875,21 @@ function! s:TraceWithDiffCommand(u1, u2)
 		endfor
 	endfor
 
-	" when a hunk takes multiple lines in this diff output,
-	" find and merge continuous 'a+d' and 'd+a' to one 'c'
-	if hml > 0
-		for [ln, ds] in items(dlc)
-			let cc = join(map(copy(ds), 'v:val[0]'), '')
-			if stridx(cc, 'ad') == -1 && stridx(cc, 'da') == -1
-				continue
+	" merge continuous 'a+d' and 'd+a' to one 'c'
+	for ln in hda
+		let ds = dlc[ln]
+		let dn = len(ds)
+		for n in range(dn - 1)
+			if empty(ds[n][2]) && empty(ds[n + 1][1])
+				let ds[n] = ['c', ds[n][1], ds[n + 1][2]]
+				unlet ds[n + 1]
+			elseif empty(ds[n][1]) && empty(ds[n + 1][2])
+				let ds[n] = ['c', ds[n + 1][1], ds[n][2]]
+				unlet ds[n + 1]
 			endif
-			let dn = len(ds)
-			for n in range(dn - 1)
-				let [cdi, x1i, x2i] = ds[n]
-				let [cdj, x1j, x2j] = ds[n + 1]
-				let [d_a, a_d] = [[cdi, cdj] == ['d', 'a'],
-						\[cdi, cdj] == ['a', 'd']]
-				if d_a || a_d
-					if x1i[1] >= x1j[0] &&
-							\x1i[0] <= x1j[1] ||
-						\x2i[1] >= x2j[0] &&
-							\x2i[0] <= x2j[1]
-						let ds[n] = d_a ?
-							\['c', x1i, x2j] :
-							\['c', x1j, x2i]
-						unlet ds[n + 1]
-					endif
-				endif
-			endfor
-			if dn != len(ds) | let dlc[ln] = ds | endif
 		endfor
-	endif
+		if dn != len(ds) | let dlc[ln] = ds | endif
+	endfor
 
 	" generate a list of commands with byte index per line
 	let cbx = {}
@@ -908,6 +897,7 @@ function! s:TraceWithDiffCommand(u1, u2)
 	for [ln, ds] in items(dlc)
 		let ln -= 1
 		let [c1, c2] = [[], []]
+		let [l1, l2, p1, p2] = [1, 1, 0, 0]
 
 		let dn = len(ds)
 		for n in range(dn)
@@ -943,19 +933,26 @@ function! s:TraceWithDiffCommand(u1, u2)
 			for k in [1, 2]
 				let [s{k}, e{k}] -= [1, 1]
 				if r{k} == 'd'
-					let s{k} = (s{k} < 0) ? 0 : len(join(
-						\a:u{k}[ln][:s{k}], ''))
-					let e{k} = s{k} + 1
+					if s{k} >= 0
+						let l{k} += len(join(a:u{k}[ln]
+							\[p{k} : s{k}], ''))
+					endif
+					let h{k} = [l{k} - 1, l{k}]
+					let p{k} = e{k} + 1
 				else
-					let e{k} = len(join(
-						\a:u{k}[ln][s{k} : e{k}], ''))
-					let s{k} = (s{k} == 0) ? 1 : len(join(
-						\a:u{k}[ln][:s{k} - 1], '')) + 1
-					let e{k} += s{k} - 1
+					if s{k} > 0
+						let l{k} += len(join(a:u{k}[ln]
+							\[p{k} : s{k} - 1], ''))
+					endif
+					let r = len(join(a:u{k}[ln]
+							\[s{k} : e{k}], ''))
+					let h{k} = [l{k}, l{k} + r - 1]
+					let l{k} += r
+					let p{k} = e{k} + 1
 				endif
 			endfor
 
-			let [c1, c2] += [[[r1, [s1, e1]]], [[r2, [s2, e2]]]]
+			let [c1, c2] += [[[r1, h1]], [[r2, h2]]]
 		endfor
 
 		if !empty(c1) || !empty(c2)
