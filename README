@@ -63,6 +63,11 @@ DiffCharExpr(mxi, exd) function for the diffexpr option
     mxi: the maximum number of total lines of both windows to apply internal algorithm, apply diff command when more lines
     exd: 1 = initially show exact differences, 0 = vim original ones
 
+Update : 5.4 
+* Enhanced to show a position of a deleted unit with underline on its previous and next characters. This position is where a unit is added between those characters in another diffchar window. 
+* Improved to be able to change this plugin's global variables anytime. 
+* Changed to select current window and then the next (wincmd w) window whose buffer is different.
+
 Update : 5.3
 * Performance improved for long lines and some defects fixed when the diff command is used for the diff tracing.
 
