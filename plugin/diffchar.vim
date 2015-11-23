@@ -1,22 +1,29 @@
 " diffchar.vim - Highlight the exact differences, based on characters and words
 "
-" This plugin has been developed in order to make diff mode more useful.
-" DiffText does not show the exact difference, but this plugin will
-" highlight its difference, character by character - so called DiffChar.
+" This plugin has been developed in order to make diff mode more useful. Vim
+" highlights all the text in between the changed first and last characters
+" on changed lines. But this plugin will find the exact differences between
+" them, character by character - so called DiffChar.
 "
-" Use this plugin just after diff command. DiffText area will be narrowed
-" down to show the DiffChar. You can use this plugin in non-diff usual
-" mode as well.
+" For example, in diff mode: ([DiffText], <DiffAdd>)
 "
-" For example, diff command shows: (<|DiffText area|>)
+"    (file A) The [quick brown fox jumps over the lazy] dog.
+"    (file B) The [lazy fox jumps over the quick brown] dog.
 "
-"      (file A) The <|swift brown fox jumped over the lazy|> dog.
-"      (file B) The <|lazy fox jumped over the swift brown|> dog.
+" this plugin will exactly highlight the changed and added units:
 "
-" then this plugin will narrow down the DiffText area:
+"    (file A) The [quick] <brown >fox jumps over the [lazy] dog.
+"    (file B) The [lazy] fox jumps over the [quick] <brown >dog.
 "
-"      (file A) The <|swift brown|> fox jumped over the <|lazy|> dog.
-"      (file B) The <|lazy|> fox jumped over the <|swift brown|> dog.
+" This plugin can be triggered after diff mode starts by pressing <F7>/<F8>
+" or using SDChar command. At update 5.5, a new global variable,
+" g:DiffModeSync, is introduced. Its default is "enable" and synchronously
+" show/reset the highlights of the exact differences as soon as the diff
+" mode starts/ends. It also works on your custom diff tool (e.g. git-diff)
+" when specified to the diffexpr option.
+"
+" In diff mode, this plugin compares the corresponding changed lines between
+" two windows. In non-diff mode, it compares the same lines between them.
 "
 " This plugin has been using "An O(NP) Sequence Comparison Algorithm"
 " developed by S.Wu, et al., which always finds an optimum sequence quickly.
@@ -27,19 +34,17 @@
 " variable, continuously switches to the diff command at that point, and
 " then joins both results. This approach provides a stable performance and
 " reasonable accuracy, because the diff command effectively optimizes
-" between them. The default of its variable is 500 ms, which would be useful
-" for smaller files. If prefer to always apply the internal algorithm for
-" accuracy (or the diff command for performance) only, set some large value
-" (or 0) to the variable.
+" between them. The default of its variable is 500 ms, which would be
+" useful for smaller files. If prefer to always apply the internal algorithm
+" for accuracy (or the diff command for performance) only, set some large
+" value (or 0) to the variable.
 "
 " Since update 4.7, this plugin has set the DiffCharExpr() to the diffexpr
-" option, if it is empty. This function would be useful for smaller files.
-" If the total number of lines on both diff windows <= 200, by default,
-" it applies this plugin's internal algorithm to make the diff faster.
-" And, by default, it initially shows the exact differences for all lines
-" whenever diff mode begins. You can change these arguments of this function
-" like "set diffexpr=DiffCharExpr(100, 0)", but if prefer not to use this
-" enhancement, set 0 to g:DiffExpr.
+" option, if it is empty. this function would be rather useful for smaller
+" files than the diff command. If the total number of lines on two windows
+" <= 200, by default, this plugin's internal algorithm is used to make the
+" diff faster. If prefer to leave the diffexpr option as empty, set 0 to
+" g:DiffExpr.
 "
 " This plugin has been always positively supporting mulltibyte characters.
 "
@@ -76,16 +81,39 @@
 "     100 : all available colors in dynamic random order
 "         (notes : always DiffAdd for added units)
 " g:DiffUpdate - interactively updating of highlightings while editing
-"     0 : disable (default)
-"     1 : enable
+"     1 : enable (default)
+"     0 : disable
 "       (notes : available on vim 7.4)
 " g:DiffSplitTime - a time length (ms) to apply the internal algorithm first
 "     0 ~ : (500 as default)
+" g:DiffModeSync - synchronously show/reset with diff mode
+"     1 : enable (default)
+"     0 : disable
+" g:DiffExpr - set DiffCharExpr() to the diffexpr potion
+"     1 : enable (default)
+"     0 : disable
 "
-" DiffCharExpr(mxi, exd) function for the diffexpr option
+" DiffCharExpr(mxi) function for the diffexpr option
 "     mxi: the maximum number of total lines of both windows to apply internal
 "          algorithm, apply diff command when more lines
-"     exd: 1 = initially show exact differences, 0 = vim original ones
+"
+" Update : 5.5
+" * Introduced g:DiffModeSync to synchronously show/reset the highlights as
+"   the diff mode starts/ends, which also works on your custom diff tool.
+" * Changed to enable g:DiffUpdate as a default and then interactively update
+"   the highlights while editing.
+" * Enhanced to draw and delete the highlights faster by specifying as many
+"   position parameters as possible in one matchaddpos() and matchadd() call.
+" * Changed to select current window and next diff mode window (if present)
+"   whose buffer is different at initialize.
+" * Fixed:
+"   - caused an error on getwinvar() in vim 7.3.
+"   - in non-gVim, did not show a matching pair cursor when jumping the
+"     cursor by using [e or ]b, depending on a color scheme.
+"   - sometimes failed to toggle the highlights when using <F7> or <F8> in
+"     diff mode windows.
+"   - did not interactively update the highlight of all the lines when
+"     multiple lines were changed at once if g:DiffUpdate = 1.
 "
 " Update : 5.4
 " * Enhanced to show a position of a deleted unit with underline on its
@@ -274,36 +302,36 @@
 "   the initial version.
 "
 " Author: Rick Howe
-" Last Change: 2015/10/06
+" Last Change: 2015/11/23
 " Created:
 " Requires:
-" Version: 5.4
+" Version: 5.5
 
 if exists("g:loaded_diffchar")
 	finish
 endif
-let g:loaded_diffchar = 5.4
+let g:loaded_diffchar = 5.5
 
 let s:save_cpo = &cpo
 set cpo&vim
 
 " Commands
-command! -range SDChar call s:ShowDiffChar(<line1>, <line2>)
-command! -range RDChar call s:ResetDiffChar(<line1>, <line2>)
+command! -range SDChar call s:ShowDiffChar(range(<line1>, <line2>))
+command! -range RDChar call s:ResetDiffChar(range(<line1>, <line2>))
 
 " Configurable Keymaps
 nnoremap <silent> <Plug>ToggleDiffCharAllLines
-				\ :call <SID>ToggleDiffChar(1, line('$'))<CR>
+			\ :call <SID>ToggleDiffChar(range(1, line('$')))<CR>
 nnoremap <silent> <Plug>ToggleDiffCharCurrentLine
-				\ :call <SID>ToggleDiffChar(line('.'))<CR>
+			\ :call <SID>ToggleDiffChar([line('.')])<CR>
 nnoremap <silent> <Plug>JumpDiffCharPrevStart
-				\ :call <SID>JumpDiffChar(0, 1)<CR>
+			\ :call <SID>JumpDiffChar(0, 1)<CR>
 nnoremap <silent> <Plug>JumpDiffCharNextStart
-				\ :call <SID>JumpDiffChar(1, 1)<CR>
+			\ :call <SID>JumpDiffChar(1, 1)<CR>
 nnoremap <silent> <Plug>JumpDiffCharPrevEnd
-				\ :call <SID>JumpDiffChar(0, 0)<CR>
+			\ :call <SID>JumpDiffChar(0, 0)<CR>
 nnoremap <silent> <Plug>JumpDiffCharNextEnd
-				\ :call <SID>JumpDiffChar(1, 0)<CR>
+			\ :call <SID>JumpDiffChar(1, 0)<CR>
 if !hasmapto('<Plug>ToggleDiffCharAllLines', 'n')
 	nmap <silent> <F7> <Plug>ToggleDiffCharAllLines
 endif
@@ -342,117 +370,152 @@ let g:DiffColors = 0		" always 1 color
 endif
 
 " Set a difference unit updating while editing
-if !exists("g:DiffUpdate")
 if exists("##TextChanged") && exists("##TextChangedI")
-let g:DiffUpdate = 0		" disable
-" let g:DiffUpdate = 1		" enable
+if !exists("g:DiffUpdate")
+let g:DiffUpdate = 1		" enable
+" let g:DiffUpdate = 0		" disable
 endif
 endif
 
 " Set a time length (ms) to apply this plugin's internal algorithm first
 if !exists("g:DiffSplitTime")
-let g:DiffSplitTime = 500	" if timeout, split to diff command
+let g:DiffSplitTime = 500	" when timeout, split to diff command
+" let g:DiffSplitTime = 0	" always apply diff command only
 endif
 
-" Set a diff expression if empty
-if !exists("g:DiffExpr") || g:DiffExpr
-if empty(&diffexpr)
-let &diffexpr = "DiffCharExpr(200, 1)"	" set # of lines and show exact diffs
-" let &diffexpr = "DiffCharExpr(0, 0)"	" apply ext cmd and show vim original
+" Set a diff mode synchronization to show/reset exact differences
+if !exists("g:DiffModeSync")
+let g:DiffModeSync = 1		" enable
+" let g:DiffModeSync = 0	" disable
 endif
+
+" Set this plugin's DiffCharExpr() to the diffexpr option if empty
+if !exists("g:DiffExpr")
+let g:DiffExpr = 1		" enable
+" let g:DiffExpr = 0		" disable
+endif
+if g:DiffExpr && empty(&diffexpr)
+let &diffexpr = "DiffCharExpr(200)"	" use internal algo if <= 200 lines
+" let &diffexpr = "DiffCharExpr(0)"	" use diff command only
 endif
 
 " Set an event group of this plugin
 augroup dchar
 au!
+au! FilterWritePre * call s:SetDiffModeSync()
 augroup END
 
-function! DiffCharExpr(mxi, exd)
+function! DiffCharExpr(mxi)
 	" read both files to be diff traced
 	let [f1, f2] = [readfile(v:fname_in), readfile(v:fname_new)]
 
 	" find the fist diff trial call and return here
 	if [f1, f2] == [["line1"], ["line2"]]
 		call writefile(["1c1"], v:fname_out)
-		" set an event here to remember buf numbers of
-		" v:fname_in (1st) and v:fname_new (last)
-		if a:exd
-			let s:dbuf = []
-			au! dchar FilterWritePost * let s:dbuf += [bufnr('%')]
-		endif
 		return
 	endif
 
 	" get a list of diff commands and write to output file
-	let dfcmd = (len(f1 + f2) <= a:mxi) ?
-		\s:ApplyInternalAlgorithm(f1, f2) : s:ApplyDiffCommand()
-	call writefile(dfcmd, v:fname_out)
+	call writefile(len(f1 + f2) > a:mxi ? s:ApplyDiffCommand() :
+		\s:ApplyInternalAlgorithm(f1, f2), v:fname_out)
+endfunction
 
-	" if some diff window still remain, return here and wait next call
+function! s:SetDiffModeSync()
+	if !g:DiffModeSync | return | endif
+
+	" set current bufnr, actual diff winnr, actual diff bufnr
+	let cbuf = bufnr('%')
 	let dwin = filter(range(1, winnr('$')), 'getwinvar(v:val, "&diff")')
-	if !empty(filter(copy(dwin), 'index(s:dbuf, winbufnr(v:val)) == -1'))
-		return
+	let dbuf = map(copy(dwin), 'winbufnr(v:val)')
+
+	" reset bufnr record
+	if exists("s:save_dex")
+		" diffexpr was not invoked in last prepare, meaning it was
+		" the first event in one diff session, reset except last one
+		if len(s:diffbuf) > 1 | unlet s:diffbuf[:-2] | endif
 	endif
+	if !exists("s:diffbuf") || index(s:diffbuf, cbuf) != -1 ||
+		\!empty(filter(copy(s:diffbuf), 'index(dbuf, v:val) == -1'))
+		" this is the first event in one diff session, reset all
+		let s:diffbuf = []
+	endif
+
+	" append current bufnr where the event happens
+	let s:diffbuf += [cbuf]
+
+	" run each time when event happens on 2 buffers among one session
+	if len(s:diffbuf) > 1
+		" find winnr of v:fname_in(s:diffbuf[0]) and v:fname_new([-1])
+		let win = {}
+		let cwin = winnr()
+		for k in [1, 2]
+			let w = filter(copy(dwin), 'winbufnr(v:val) ==
+						\s:diffbuf[k == 1 ? 0 : -1]')
+			let win[k] = (len(w) > 1 &&
+					\index(w, cwin) != -1) ? cwin : w[0]
+		endfor
+
+		" prepare diffexpr to be called soon
+		if !exists("s:save_dex")
+			let s:save_dex = &diffexpr
+		endif
+		let &diffexpr = "DiffModeSyncExpr(" . string(win) . ")"
+	endif
+endfunction
+
+function! DiffModeSyncExpr(win)
+	" call saved diffexpr or diff command if empty
+	call eval(empty(s:save_dex) ? "DiffCharExpr(0)" : s:save_dex)
 
 	" clear current diffchar highlights if present
 	if exists("t:DChar")
-		if winnr() == t:DChar.win[1] || winnr() == t:DChar.win[2]
-			call s:ResetDiffChar(1, line('$'))
+		call s:RefreshDiffCharWID()
+		let cwin = winnr()
+		if index(values(t:DChar.win), cwin) != -1
+			call s:ResetDiffChar(range(1, line('$')))
 		else
-			let cwin = winnr()
-			let ei = &eventignore | let &eventignore = "all"
+			let save_ei = &eventignore | let &eventignore = "all"
 			exec t:DChar.win[1] . "wincmd w"
-			call s:ResetDiffChar(1, line('$'))
+			call s:ResetDiffChar(range(1, line('$')))
 			exec cwin . "wincmd w"
-			let &eventignore = ei
+			let &eventignore = save_ei
 		endif
 	endif
 
-	" return if no need to show exact differences
-	if !a:exd | return | endif
-
-	" reset the event
-	au! dchar FilterWritePost *
-
 	" find 'c' command and extract the line to be changed
 	let [c1, c2] = [[], []]
-	for ct in filter(dfcmd, 'v:val =~ "c"')
-		let cl = split(substitute(ct,
-			\'^\(\d\+\)\%(,\(\d\+\)\)\=c\(\d\+\)\%(,\(\d\+\)\)\=$',
-						\'\1 \2 \3 \4', ''), ' ', 1)
-		let cn = min([empty(cl[1]) ? 0 : cl[1] - cl[0],
-					\empty(cl[3]) ? 0 : cl[3] - cl[2]])
-		let [c1, c2] += [range(cl[0], cl[0] + cn),
-						\range(cl[2], cl[2] + cn)]
-	endfor
-	" return if no changed lines
-	if empty(c1) | return | endif
-
-	" initialize diffchar
-	if s:InitializeDiffChar() == -1 | return | endif
-
-	" set window numbers and changed lines
-	let [t:DChar.win, t:DChar.vdl] = [{}, {}]
-	for k in [1, 2]
-		" find each window to show diffchar from s:dbuf[0] and [-1]
-		let w{k} = filter(copy(dwin),
-				\'winbufnr(v:val) == s:dbuf[k == 1 ? 0 : -1]')
-		let t:DChar.win[k] = (len(w{k}) > 1 &&
-			\index(w{k}, winnr()) != -1) ? winnr() : w{k}[0]
-		let t:DChar.vdl[k] = c{k}
+	for ct in filter(readfile(v:fname_out), 'v:val =~ "^\\d.*c"')
+		let [p1, p2] = map(split(ct, 'c'), 'split(v:val, ",")')
+		let cn = min([len(p1) == 1 ? 0 : p1[1] - p1[0],
+					\len(p2) == 1 ? 0 : p2[1] - p2[0]])
+		let [c1, c2] += [range(p1[0], p1[0] + cn),
+						\range(p2[0], p2[0] + cn)]
 	endfor
 
-	" highlight the changed lines
-	call s:MarkDiffCharID(1)
-	if winnr() == t:DChar.win[1] || winnr() == t:DChar.win[2]
-		call s:ShowDiffChar(1, line('$'))
-	else
+	" if there are changed lines and initialize successes
+	if !empty(c1) && !empty(c2) && s:InitializeDiffChar() != -1
+		" change window numbers and diff lines
+		let t:DChar.win = a:win
+		let t:DChar.vdl = {1: c1, 2: c2}
+
+		" highlight the diff changed lines
+		call s:MarkDiffCharWID(1)
 		let cwin = winnr()
-		let ei = &eventignore | let &eventignore = "all"
-		exec t:DChar.win[1] . "wincmd w"
-		call s:ShowDiffChar(1, line('$'))
-		exec cwin . "wincmd w"
-		let &eventignore = ei
+		if index(values(t:DChar.win), cwin) != -1
+			call s:ShowDiffChar(range(1, line('$')))
+		else
+			let save_ei = &eventignore | let &eventignore = "all"
+			exec t:DChar.win[1] . "wincmd w"
+			call s:ShowDiffChar(range(1, line('$')))
+			exec cwin . "wincmd w"
+			let &eventignore = save_ei
+		endif
+	endif
+
+	" resume back to the original diffexpr
+	if exists("s:save_dex")
+		let &diffexpr = s:save_dex
+		unlet s:save_dex
 	endif
 endfunction
 
@@ -502,10 +565,10 @@ function! s:ApplyDiffCommand()
 	let opt = "-a --binary "
 	if &diffopt =~ "icase" | let opt .= "-i " | endif
 	if &diffopt =~ "iwhite" | let opt .= "-b " | endif
-	let dfout = system("diff " . opt . v:fname_in . " " . v:fname_new)
-
 	" return diff commands only
-	return filter(split(dfout, '\n'), 'v:val =~ "^\\d"')
+	return filter(split(
+		\system("diff " . opt . v:fname_in . " " . v:fname_new),
+						\'\n'), 'v:val =~ "^\\d"')
 endfunction
 
 function! s:InitializeDiffChar()
@@ -517,33 +580,48 @@ function! s:InitializeDiffChar()
 	" define a DiffChar dictionary on this tab page
 	let t:DChar = {}
 
-	" select current window and next window whose buffer is different
+	" select current window and next (diff mode if available) window
+	" whose buffer is different
 	let t:DChar.win = {}
 	let cwin = winnr()
-	for nwin in range(cwin + 1, winnr('$')) + range(1, cwin - 1)
-		if winbufnr(nwin) != winbufnr(cwin)
-			break
+	let nwin = -1
+	for w in range(cwin + 1, winnr('$')) + range(1, cwin - 1)
+		if winbufnr(w) != winbufnr(cwin)
+			if nwin == -1 | let nwin = w | endif
+			if getwinvar(w, "&diff")
+				let nwin = w
+				break
+			endif
 		endif
 	endfor
 	let [t:DChar.win[1], t:DChar.win[2]] = [cwin, nwin]
-	call s:MarkDiffCharID(1)
+	call s:MarkDiffCharWID(1)
+
+	" set highlight groups used for diffchar on this tab page
+	let t:DChar.dhl = {"A": "DiffAdd", "C": "DiffChange",
+		\"D": "DiffDelete", "T": "DiffText", "Z": "_DiffDelPos",
+		\"U": has("gui_running") ? "Cursor" : "CursorColumn"}
 
 	" find corresponding DiffChange/DiffText lines on diff mode windows
 	let t:DChar.vdl = {}
-	let dh = [hlID("DiffChange"), hlID("DiffText")]
-	let ei = &eventignore | let &eventignore = "all"
+	let dh = [hlID(t:DChar.dhl.C), hlID(t:DChar.dhl.T)]
+	let save_ei = &eventignore | let &eventignore = "all"
 	for k in [1, 2]
 		if getwinvar(t:DChar.win[k], "&diff")
 			exec t:DChar.win[k] . "wincmd w"
 			let t:DChar.vdl[k] = filter(range(1, line('$')),
 				\'index(dh, diff_hlID(v:val, 1)) != -1')
+			if empty(t:DChar.vdl[k])
+				unlet t:DChar.vdl
+				break
+			endif
 		else
 			unlet t:DChar.vdl
 			break
 		endif
 	endfor
 	exec cwin . "wincmd w"
-	let &eventignore = ei
+	let &eventignore = save_ei
 
 	" set ignorecase and ignorespace flags
 	let t:DChar.igc = (&diffopt =~ "icase")
@@ -578,12 +656,25 @@ function! s:InitializeDiffChar()
 		echo 'Not a valid difference unit type. Use "Char" instead.'
 	endif
 
+	" set a difference unit updating on this tab page
+	" and a record of line values and number of total lines
+	if exists("##TextChanged") && exists("##TextChangedI")
+		if exists("t:DiffUpdate") ? t:DiffUpdate : g:DiffUpdate
+			let t:DChar.lsv = {}
+			let [t:DChar.lsv[1], t:DChar.lsv[2]] = [{}, {}]
+		endif
+	endif
+
+	" Set a time length (ms) to apply the internal algorithm first
+	let t:DChar.slt = exists("t:DiffSplitTime") ?
+				\t:DiffSplitTime : g:DiffSplitTime
+
 	" set a matching pair cursor id on this tab page
-	let t:DChar.mpc = {}
+	let t:DChar.pci = {}
 
 	" set a difference matching colors on this tab page
 	let dc = exists("t:DiffColors") ? t:DiffColors : g:DiffColors
-	let t:DChar.dmc = ["DiffText"]
+	let t:DChar.dmc = [t:DChar.dhl.T]
 	if dc == 1
 		let t:DChar.dmc += ["NonText", "Search", "VisualNOS"]
 	elseif dc == 2
@@ -593,14 +684,13 @@ function! s:InitializeDiffChar()
 		let t:DChar.dmc += ["NonText", "Search", "VisualNOS",
 			\"ErrorMsg", "MoreMsg", "TabLine", "Title",
 			\"StatusLine", "WarningMsg", "Conceal", "SpecialKey",
-			\"ColorColumn", "ModeMsg", "SignColumn", "CursorLineNr"]
+			\"ColorColumn", "ModeMsg", "SignColumn", "Question"]
 	elseif dc == 100
 		redir => hl | silent highlight | redir END
 		let h = map(filter(split(hl, '\n'),
 			\'v:val =~ "^\\S" && v:val =~ "="'), 'split(v:val)[0]')
-		for c in ["DiffAdd", "DiffDelete", "DiffChange", "DiffText",
-				\hlexists("Cursor") ? "Cursor" : "MatchParen"]
-			unlet h[index(h, c)]
+		for c in values(t:DChar.dhl)
+			let i = index(h, c) | if i != -1 | unlet h[i] | endif
 		endfor
 		while !empty(h)
 			let r = localtime() % len(h)
@@ -608,21 +698,11 @@ function! s:InitializeDiffChar()
 		endwhile
 	endif
 
-	" set a difference unit updating on this tab page
-	" and a record of line string values
-	if exists("##TextChanged") && exists("##TextChangedI")
-		if exists("t:DiffUpdate") ? t:DiffUpdate : g:DiffUpdate
-			let t:DChar.lsv = {}
-		endif
-	endif
-
-	" Set a time length (ms) to apply the internal algorithm first
-	let t:DChar.slt = exists("t:DiffSplitTime") ?
-				\t:DiffSplitTime : g:DiffSplitTime
-
-	" set a highlight group to show a position of a deleted unit
+	" define a specific highlight group to show a position
+	" of a deleted unit, _DiffDelPos = DiffChange +/- underline
+	exec "silent highlight clear " . t:DChar.dhl.Z
 	" get current DiffChange
-	redir => hl | silent highlight DiffChange | redir END
+	redir => hl | exec "silent highlight " . t:DChar.dhl.C | redir END
 	let ha = {}
 	for [ky, ag] in map(filter(split(hl, '\%(\n\|\s\)\+'),
 				\'v:val =~ "="'), 'split(v:val, "=")')
@@ -632,31 +712,31 @@ function! s:InitializeDiffChar()
 	let at = "underline"
 	let hm = has("gui_running") ? "gui" : &t_Co > 1 ? "cterm" : "term"
 	let ha[hm] = !exists("ha[hm]") ? at :
-		\match(ha[hm], at) == -1 ? ha[hm] . ',' . at :
+			\match(ha[hm], at) == -1 ? ha[hm] . ',' . at :
 			\substitute(ha[hm], at . ',\=\|,\=' . at, '', '')
-	" define and set another DiffChange
-	silent highlight clear _DiffChange
-	exec "silent highlight _DiffChange " . join(values(map(
-			\filter(ha, '!empty(v:val)'), 'v:key . "=" . v:val')))
+	" set as a highlight
+	exec "silent highlight " . t:DChar.dhl.Z . " " .
+			\join(values(map(filter(ha, '!empty(v:val)'),
+						\'v:key . "=" . v:val')))
 endfunction
 
-function! s:ShowDiffChar(sl, el)
+function! s:ShowDiffChar(lines)
 	" initialize when t:DChar is not defined
 	if !exists("t:DChar") && s:InitializeDiffChar() == -1 | return | endif
 
-	call s:RefreshDiffCharWin()
+	" refresh window number of diffchar windows
+	call s:RefreshDiffCharWID()
 
+	" return if current window is not either of diffchar windows
 	let cwin = winnr()
-	if cwin == t:DChar.win[1] | let k = 1
-	elseif cwin == t:DChar.win[2] | let k = 2
-	else | return | endif
+	for k in [1, 2, 0]
+		if k == 0 | return | endif
+		if t:DChar.win[k] == cwin | break | endif
+	endfor
 
-	" set a possible DiffChar line list between sl and el
-	if exists("t:DChar.vdl")	" diff mode
-		let [d1, d2] = s:GetDiffModeLines(k, a:sl, a:el)
-	else				" non-diff mode
-		let [d1, d2] = [range(a:sl, a:el), range(a:sl, a:el)]
-	endif
+	" set a possible DiffChar line list among a:lines
+	let [d1, d2] = exists("t:DChar.vdl") ?
+		\s:DiffModeLines(k, a:lines) : [copy(a:lines), copy(a:lines)]
 
 	" remove already highlighted lines and get those text
 	for k in [1, 2]
@@ -671,13 +751,9 @@ function! s:ShowDiffChar(sl, el)
 
 	" remove redundant lines in either window
 	if n1 > n2
-		unlet u1[n2 - n1 :]
-		unlet d1[n2 - n1 :]
-		let n1 = n2
+		unlet u1[n2 - n1 :] | unlet d1[n2 - n1 :] | let n1 = n2
 	elseif n1 < n2
-		unlet u2[n1 - n2 :]
-		unlet d2[n1 - n2 :]
-		let n2 = n1
+		unlet u2[n1 - n2 :] | unlet d2[n1 - n2 :] | let n2 = n1
 	endif
 
 	" set ignorecase flag
@@ -694,7 +770,7 @@ function! s:ShowDiffChar(sl, el)
 	endfor
 	if n1 == 0
 		if empty(t:DChar.hlc[1]) || empty(t:DChar.hlc[2])
-			call s:MarkDiffCharID(0)
+			call s:MarkDiffCharWID(0)
 			unlet t:DChar
 		endif
 		let &ignorecase = save_igc
@@ -705,52 +781,72 @@ function! s:ShowDiffChar(sl, el)
 	call map(u1, 'split(v:val, t:DChar.usp)')
 	call map(u2, 'split(v:val, t:DChar.usp)')
 
-	" trace with this plugin's algorithm first,
-	" if timeout, split to the diff command
-	let cbx = s:TraceWithInternalAlgorithm(u1, u2)
-	let cmp = empty(cbx) ? 0 : max(keys(cbx)) + 1
-	if cmp < n1
-		for [ln, cx] in
-			\ items(s:TraceWithDiffCommand(u1[cmp :], u2[cmp :]))
-			let cbx[ln + cmp] = cx
-		endfor
-	endif
-
 	" a list of different lines and columns
 	let [lc1, lc2] = [{}, {}]
-	for [ln, cx] in items(cbx)
-		let [lc1[d1[ln]], lc2[d2[ln]]] = [cx[0], cx[1]]
+	let cmp = 0
+	for fn in ["TraceWithInternalAlgorithm", "TraceWithDiffCommand"]
+		" trace with this plugin's algorithm first,
+		" if timeout, split to the diff command
+		for [ln, cx] in items(s:{fn}(u1[cmp :], u2[cmp :]))
+			let [lc1[d1[cmp + ln]], lc2[d2[cmp + ln]]] =
+							\[cx[0], cx[1]]
+		endfor
+		let cmp = len(lc1)
+		if cmp >= n1 | break | endif
 	endfor
 
 	" restore ignorecase flag
 	let &ignorecase = save_igc
 
-	" highlight lines and columns and set events
-	let ei = &eventignore | let &eventignore = "all"
+	let buf = {}
+
+	" highlight lines and columns
+	let save_ei = &eventignore | let &eventignore = "all"
 	for k in [1, 2]
+		let buf[k] = winbufnr(t:DChar.win[k])
 		exec t:DChar.win[k] . "wincmd w"
 		call s:HighlightDiffChar(k, lc{k})
-		if empty(t:DChar.hlc[k]) | continue | endif
-		let buf = winbufnr(t:DChar.win[k])
-		exec "au! dchar BufWinLeave <buffer=" . buf .
-				\"> call s:ResetDiffChar(1, line('$'))"
+
 		if exists("t:DChar.lsv")
-			exec "au! dchar TextChanged <buffer=" . buf .
-					\"> call s:UpdateDiffChar(" . k . ")"
-			exec "au! dchar TextChangedI <buffer=" . buf .
-					\"> call s:UpdateDiffChar(" . k . ")"
-			let t:DChar.lsv[k] = s:GetLineStrValues(k)
+			call extend(t:DChar.lsv[k], s:LinesValues(k,
+				\map(keys(lc{k}), 'eval(v:val)')))
+			let t:DChar.lsv[k][0] = line('$')
 		endif
 	endfor
 	exec cwin . "wincmd w"
-	let &eventignore = ei
+	let &eventignore = save_ei
 
-	" reset t:DChar when no DiffChar highlightings in either buffer
 	if empty(t:DChar.hlc[1]) || empty(t:DChar.hlc[2])
-		call s:MarkDiffCharID(0)
+		call s:MarkDiffCharWID(0)
 		unlet t:DChar
-	elseif has("patch-7.4.682")
-		call s:ToggleDiffTextHL(1)
+		return
+	endif
+
+	" set events in each buffer
+	for k in [1, 2]
+		exec "au! dchar BufWinLeave <buffer=" . buf[k] .
+				\"> call s:ResetDiffChar(range(1, line('$')))"
+	endfor
+	if exists("t:DChar.lsv")
+		for k in [1, 2]
+			exec "au! dchar TextChanged,TextChangedI <buffer=" .
+				\buf[k] . "> call s:UpdateDiffChar(" . k . ")"
+		endfor
+	endif
+	if g:DiffModeSync && exists("t:DChar.vdl")
+		for k in [1, 2]
+			exec "au! dchar CursorHold <buffer=" . buf[k] .
+				\"> call s:ResetSwitchDiffModeSync(" . k . ")"
+		endfor
+		if !exists("s:save_ut") && len(filter(range(1, tabpagenr('$')),
+				\'!empty(gettabvar(v:val, "DChar"))')) == 1
+			let s:save_ut = &updatetime
+			let &updatetime = 1
+		endif
+	endif
+
+	if has("patch-7.4.682")
+		call s:ToggleDiffHL(1)
 	endif
 endfunction
 
@@ -851,7 +947,6 @@ function! s:TraceWithDiffCommand(u1, u2)
 
 	" call diff and get output as a list
 	let opt = "-a --binary "
-	if exists("g:DiffOptions") | let opt .= g:DiffOptions . " " | endif
 	if t:DChar.igc | let opt .= "-i " | endif
 	if t:DChar.igs | let opt .= "-b " | endif
 	let dfo = split(system("diff " . opt . f1 . " " . f2), '\n')
@@ -870,14 +965,12 @@ function! s:TraceWithDiffCommand(u1, u2)
 		let z2 = filter(copy(dl), 'v:val[0] == ">"')
 
 		" get an operation and line numbers from diff's command line
-		let [s1, e1, cd, s2, e2] = split(substitute(dc,
-			\'^\(\d\+\)\%(,\(\d\+\)\)\=\(.\)
-				\\(\d\+\)\%(,\(\d\+\)\)\=$',
-					\'\1 \2 \3 \4 \5', ''), ' ', 1)
-		if empty(e1) | let e1 = s1 | endif
-		if empty(e2) | let e2 = s2 | endif
-		let [s1, e1, s2, e2] = [eval(s1), eval(e1), eval(s2), eval(e2)]
-		let dx = [cd, [s1, e1], [s2, e2]]
+		let [se1, acd, se2] = map(split(substitute(
+			\dc, '[acd]', '|&|', ''), '|'), 'split(v:val, ",")')
+		let [s1, s2] = [eval(se1[0]), eval(se2[0])]
+		let [e1, e2] = [len(se1) == 1 ? s1 : eval(se1[1]),
+					\len(se2) == 1 ? s2 : eval(se2[1])]
+		let dx = acd + [[s1, e1]] + [[s2, e2]]
 
 		" check if one hunk takes signle line or not
 		let ll = map(filter(z1 + z2, 'v:val !~ "^. " . lns'),
@@ -1008,94 +1101,108 @@ function! s:TraceWithDiffCommand(u1, u2)
 	return cbx
 endfunction
 
-function! s:ResetDiffChar(sl, el)
+function! s:ResetDiffChar(lines)
 	if !exists("t:DChar") | return | endif
 
-	call s:RefreshDiffCharWin()
+	" refresh window number of diffchar windows
+	call s:RefreshDiffCharWID()
 
+	" return if current window is not either of diffchar windows
 	let cwin = winnr()
-	if cwin == t:DChar.win[1] | let k = 1
-	elseif cwin == t:DChar.win[2] | let k = 2
-	else | return | endif
+	for k in [1, 2, 0]
+		if k == 0 | return | endif
+		if t:DChar.win[k] == cwin | break | endif
+	endfor
 
-	" set a possible DiffChar line list between sl and el
-	if exists("t:DChar.vdl")	" diff mode
-		let [d1, d2] = s:GetDiffModeLines(k, a:sl, a:el)
-	else				" non-diff mode
-		let [d1, d2] = [range(a:sl, a:el), range(a:sl, a:el)]
-	endif
+	" set a possible DiffChar line list among a:lines
+	let [d1, d2] = exists("t:DChar.vdl") ?
+		\s:DiffModeLines(k, a:lines) : [copy(a:lines), copy(a:lines)]
 
-	let ei = &eventignore | let &eventignore = "all"
+	let buf = {}
+
+	" remove not highlighted lines
+	let save_ei = &eventignore | let &eventignore = "all"
 	for k in [1, 2]
-		" remove not highlighted lines
 		let hl = map(keys(t:DChar.hlc[k]), 'eval(v:val)')
 		call filter(d{k}, 'index(hl, v:val) != -1')
 
+		let buf[k] = winbufnr(t:DChar.win[k])
 		exec t:DChar.win[k] . "wincmd w"
 		call s:ClearDiffChar(k, d{k})
+		call s:ResetDiffCharPair(k)
 
-		" when no highlight exists, reset events
-		if empty(t:DChar.hlc[k])
-			let buf = winbufnr(t:DChar.win[k])
-			exec "au! dchar BufWinLeave <buffer=" . buf . ">"
-			if exists("t:DChar.lsv")
-				exec "au! dchar TextChanged <buffer=" .
-								\buf . ">"
-				exec "au! dchar TextChangedI <buffer=" .
-								\buf . ">"
-				unlet t:DChar.lsv[k]
-			endif
-			call s:ResetDiffCharPair(k)
+		if exists("t:DChar.lsv")
+			call map(d{k}, 'remove(t:DChar.lsv[k], v:val)')
 		endif
 	endfor
 	exec cwin . "wincmd w"
-	let &eventignore = ei
+	let &eventignore = save_ei
 
-	" reset t:DChar when no DiffChar highlightings in either buffer
-	if empty(t:DChar.hlc[1]) || empty(t:DChar.hlc[2])
-		if has("patch-7.4.682")
-			call s:ToggleDiffTextHL(0)
-		endif
-		call s:MarkDiffCharID(0)
-		unlet t:DChar
+	if !empty(t:DChar.hlc[1]) && !empty(t:DChar.hlc[2])
+		return
 	endif
+
+	" reset events and all when no highlight exists
+	for k in [1, 2]
+		exec "au! dchar BufWinLeave <buffer=" . buf[k] . ">"
+	endfor
+	if exists("t:DChar.lsv")
+		for k in [1, 2]
+			exec "au! dchar TextChanged,TextChangedI <buffer=" .
+								\buf[k] . ">"
+		endfor
+	endif
+	if exists("t:DChar.vdl")
+		for k in [1, 2]
+			exec "au! dchar CursorHold <buffer=" . buf[k] . ">"
+		endfor
+		if exists("s:save_ut") && len(filter(range(1, tabpagenr('$')),
+				\'!empty(gettabvar(v:val, "DChar"))')) == 1
+			let &updatetime = s:save_ut
+			unlet s:save_ut
+		endif
+	endif
+
+	if has("patch-7.4.682")
+		call s:ToggleDiffHL(0)
+	endif
+	call s:MarkDiffCharWID(0)
+	unlet t:DChar
 endfunction
 
-function! s:ToggleDiffChar(...)
-	if a:0 == 1 | let sl = a:1 | let el = a:1
-	elseif a:0 == 2 | let sl = a:1 | let el = a:2
-	else | return | endif
-
+function! s:ToggleDiffChar(lines)
 	if exists("t:DChar")
-		for l in range(sl, el)
-			if has_key(t:DChar.hlc[1], l) ||
-						\has_key(t:DChar.hlc[2], l)
-				call s:ResetDiffChar(sl, el)
+		call s:RefreshDiffCharWID()
+		for k in [1, 2, 0]
+			if k == 0 | return | endif
+			if t:DChar.win[k] == winnr() | break | endif
+		endfor
+		for hl in keys(t:DChar.hlc[k])
+			if index(a:lines, eval(hl)) != -1
+				call s:ResetDiffChar(a:lines)
 				return
 			endif
 		endfor
 	endif
-	call s:ShowDiffChar(sl, el)
+	call s:ShowDiffChar(a:lines)
 endfunction
 
 function! s:HighlightDiffChar(key, lec)
 	for [l, ec] in items(a:lec)
 		if has_key(t:DChar.mid[a:key], l) | continue | endif
-		if exists("*matchaddpos")
-			let mid = [matchaddpos("DiffChange", [[l]], 0)]
-		else
-			let dl = '\%' . l . 'l'
-			let mid = [matchadd("DiffChange", dl . '.', 0)]
-		endif
-		let n = 0
+		let t:DChar.hlc[a:key][l] = ec
+
+		" collect all the column positions per highlight group
+		let ap = {}
+		let cn = 0
 		for [e, c] in ec
 			if e == 'c'
-				let hl = t:DChar.dmc[n % len(t:DChar.dmc)]
-				let n += 1
+				let hl = t:DChar.dmc[cn % len(t:DChar.dmc)]
+				let cn += 1
 			elseif e == 'a'
-				let hl = "DiffAdd"
+				let hl = t:DChar.dhl.A
 			elseif e == 'd'
-				let hl = "_DiffChange"
+				let hl = t:DChar.dhl.Z
 				let bl = getbufline(
 					\winbufnr(t:DChar.win[a:key]), l)[0]
 				let c = [c[0] - (0 < c[0] ? len(split(
@@ -1103,16 +1210,36 @@ function! s:HighlightDiffChar(key, lec)
 					\c[1] + (c[1] <= len(bl) ? len(split(
 					\bl[c[1] - 1:], '\zs')[0]) : 0) - 1]
 			endif
-			if exists("*matchaddpos")
-				let mid += [matchaddpos(hl,
-					\[[l, c[0], c[1] - c[0] + 1]], 0)]
-			else
-				let dc = '\%>' . (c[0] - 1) . 'c\%<' .
-							\(c[1] + 1) . 'c'
-				let mid += [matchadd(hl, dl . dc, 0)]
-			endif
+			let ap[hl] = get(ap, hl, []) + [c]
 		endfor
-		let [t:DChar.mid[a:key][l], t:DChar.hlc[a:key][l]] = [mid, ec]
+
+		" do highlightings on all the lines and columns
+		" with minimum matchaddpos() or one matchadd() call
+		if exists("*matchaddpos")
+			let t:DChar.mid[a:key][l] =
+				\[matchaddpos(t:DChar.dhl.C, [[l]], 0)]
+			for [hl, cp] in items(ap)
+				call map(cp, '[l, v:val[0],
+						\v:val[1] - v:val[0] + 1]')
+				while !empty(cp)
+					let t:DChar.mid[a:key][l] +=
+						\[matchaddpos(hl, cp[:7], 0)]
+					unlet cp[:7]
+				endwhile
+			endfor
+		else
+			let dl = '\%' . l . 'l'
+			let t:DChar.mid[a:key][l] =
+				\[matchadd(t:DChar.dhl.C, dl . '.', 0)]
+			for [hl, cp] in items(ap)
+				call map(cp, '"\\%>" . (v:val[0] - 1) .
+					\"c\\%<" . (v:val[1] + 1) . "c"')
+				let dc = len(cp) > 1 ?
+					\'\%(' . join(cp, '\|') . '\)' : cp[0]
+				let t:DChar.mid[a:key][l] +=
+						\[matchadd(hl, dl . dc, 0)]
+			endfor
+		endif
 	endfor
 endfunction
 
@@ -1127,9 +1254,17 @@ function! s:ClearDiffChar(key, lines)
 endfunction
 
 function! s:UpdateDiffChar(key)
+	call s:RefreshDiffCharWID()
+	let cwin = winnr()
+	if cwin != t:DChar.win[a:key]
+		let save_ei = &eventignore | let &eventignore = "all"
+		exec t:DChar.win[a:key] . "wincmd w"
+	endif
+
 	" if number of lines was changed, reset all
-	if len(t:DChar.lsv[a:key]) != line('$')
-		call s:ResetDiffChar(1, line('$'))
+	if t:DChar.lsv[a:key][0] != line('$')
+		call s:ResetDiffChar(
+			\range(1, max([t:DChar.lsv[a:key][0], line('$')])))
 		return
 	endif
 
@@ -1137,64 +1272,91 @@ function! s:UpdateDiffChar(key)
 	let sdc = deepcopy(t:DChar)
 	let [sdc.mid[1], sdc.mid[2]] = [{}, {}]
 	let [sdc.hlc[1], sdc.hlc[2]] = [{}, {}]
+	if exists("sdc.dtm") | unlet sdc.dtm | endif
+	if exists("sdc.lsv") | let [sdc.lsv[1], sdc.lsv[2]] = [{}, {}] | endif
 
 	" update only highlighted and current changed lines
-	let lsv = s:GetLineStrValues(a:key)
-	for l in map(keys(t:DChar.hlc[a:key]), 'eval(v:val)')
-		if lsv[l - 1] != t:DChar.lsv[a:key][l - 1]
-			call s:ResetDiffChar(l, l)
-			if !exists("t:DChar") | let t:DChar = sdc | endif
-			call s:MarkDiffCharID(1)
-			call s:ShowDiffChar(l, l)
-		endif
-	endfor
+	let hl = map(keys(t:DChar.hlc[a:key]), 'eval(v:val)')
+	let lsv = s:LinesValues(a:key, hl)
+	let chl = filter(hl, 'lsv[v:val] != t:DChar.lsv[a:key][v:val]')
+
+	call s:ResetDiffChar(chl)
+	if !exists("t:DChar") | let t:DChar = sdc | endif
+	call s:MarkDiffCharWID(1)
+
+	call s:ShowDiffChar(chl)
+
+	if exists("save_ei")
+		exec cwin . "wincmd w"
+		let &eventignore = save_ei
+	endif
 endfunction
 
-function! s:GetDiffModeLines(key, sl, el)
+function! s:ResetSwitchDiffModeSync(key)
+	" when diff mode turns off on the current window, reset it
+	if &diff | return | endif
+
+	call s:RefreshDiffCharWID()
+
+	let cwin = winnr()
+	if cwin != t:DChar.win[a:key] | return | endif
+
+	let [win, vdl] = [t:DChar.win, t:DChar.vdl]
+
+	call s:ResetDiffChar(range(1, line('$')))
+
+	" switch to another diff mode window of the same buffer if present
+	let bwin = filter(range(1, winnr('$')),
+		\'winbufnr(v:val) == bufnr("%") && getwinvar(v:val, "&diff")')
+	if !empty(bwin) && s:InitializeDiffChar() != -1
+		let t:DChar.win = map(win, 'v:key == a:key ? bwin[0] : v:val')
+		let t:DChar.vdl = vdl
+
+		call s:MarkDiffCharWID(1)
+
+		let save_ei = &eventignore | let &eventignore = "all"
+		exec t:DChar.win[1] . "wincmd w"
+		call s:ShowDiffChar(range(1, line('$')))
+		exec cwin . "wincmd w"
+		let &eventignore = save_ei
+	endif
+endfunction
+
+function! s:DiffModeLines(key, lines)
 	" in diff mode, need to compare the different line between windows
-	" if current window is t:DChar.win[1], narrow sl <= t:DChar.vdl[1]
-	" <= el and get the corresponding lines from t:DChar.vdl[2]
-	let [i, j] = (a:key == 1) ? [1, 2] : [2, 1]
+	" if current window is t:DChar.win[1], narrow a:lines within vdl[1]
+	" and get the corresponding lines from vdl[2]
 	let [d1, d2] = [copy(t:DChar.vdl[1]), copy(t:DChar.vdl[2])]
-	for l in range(len(d{i}))
-		if d{i}[l] < a:sl || a:el < d{i}[l]
-			let [d{i}[l], d{j}[l]] = [-1, -1]
-		endif
-	endfor
-	call filter(d1, 'v:val != -1')
-	call filter(d2, 'v:val != -1')
+	let [i, j] = (a:key == 1) ? [1, 2] : [2, 1]
+	call map(d{i}, 'index(a:lines, v:val) == -1 ? -1 : v:val')
+	call filter(d{j}, 'd{i}[v:key] != -1')
+	call filter(d{i}, 'v:val != -1')
 	return [d1, d2]
 endfunction
 
-function! s:GetLineStrValues(key)
-	let hl = map(keys(t:DChar.hlc[a:key]), 'eval(v:val)')
-	let lsv = []
-	for l in range(1, line('$'))
-		if index(hl, l) != -1
-			let str = getbufline(winbufnr(t:DChar.win[a:key]), l)[0]
-			let val = 0
-			for n in range(len(str))
-				let val += char2nr(str[n]) * (n + 1)
-			endfor
-			let lsv += [val]
-		else
-			let lsv += [-1]
-		endif
+function! s:LinesValues(key, lines)
+	let lsv = {}
+	for l in a:lines
+		exec "let lsv[l] = " . substitute(sha256(getbufline(winbufnr(
+			\t:DChar.win[a:key]), l)[0]), '.\{4}', '+0x&', 'g')
 	endfor
 	return lsv
 endfunction
 
 function! s:JumpDiffChar(dir, pos)
-	" dir : 1 = forward, else = backward
-	" pos : 1 = start, else = end
+	" dir : 1 = forward, 0 = backward
+	" pos : 1 = start, 0 = end
 	if !exists("t:DChar") | return | endif
 
-	call s:RefreshDiffCharWin()
+	" refresh window number of diffchar windows
+	call s:RefreshDiffCharWID()
 
+	" return if current window is not either of diffchar windows
 	let cwin = winnr()
-	if cwin == t:DChar.win[1] | let k = 1
-	elseif cwin == t:DChar.win[2] | let k = 2
-	else | return | endif
+	for k in [1, 2, 0]
+		if k == 0 | return | endif
+		if t:DChar.win[k] == cwin | break | endif
+	endfor
 
 	let found = 0
 	let l = line('.')
@@ -1252,14 +1414,14 @@ function! s:ShowDiffCharPair(key, line, col, pos)
 		let pc = 0 < c[0] ? split(bl[:c[0] - 1], '\zs')[-1] : ""
 		let nc = c[1] <= len(bl) ? split(bl[c[1] - 1:], '\zs')[0] : ""
 		" echo a-----b with DiffChange/DiffDelete
-		echohl DiffChange
+		exec "echohl " . t:DChar.dhl.C
 		echon pc
-		echohl DiffDelete
+		exec "echohl " . t:DChar.dhl.D
 		let col = t:DChar.hlc[a:key][a:line][a:col][1]
 		echon repeat('-', strwidth(
 			\getbufline(winbufnr(t:DChar.win[a:key]), a:line)[0]
 						\[col[0] - 1 : col[1] - 1]))
-		echohl DiffChange
+		exec "echohl " . t:DChar.dhl.C
 		echon nc
 		echohl None
 		" set position/length for both side of deleted unit
@@ -1269,9 +1431,9 @@ function! s:ShowDiffCharPair(key, line, col, pos)
 		" changed unit
 		let dc = bl[c[0] - 1 : c[1] - 1]
 		" echo the matching unit with its color
-		exec "echohl " . t:DChar.dmc[
-			\(count(map(t:DChar.hlc[m][line][: a:col],
-			\'v:val[0]'), 'c') - 1) % len(t:DChar.dmc)]
+		exec "echohl " . t:DChar.dmc
+				\[(count(map(t:DChar.hlc[m][line][: a:col],
+				\'v:val[0]'), 'c') - 1) % len(t:DChar.dmc)]
 		echon dc
 		echohl None
 		" set position/length for matching unit
@@ -1280,49 +1442,48 @@ function! s:ShowDiffCharPair(key, line, col, pos)
 	endif
 
 	" show cursor on deleted unit or matching unit on another window
-	let ei = &eventignore | let &eventignore = "all"
+	let save_ei = &eventignore | let &eventignore = "all"
 	exec t:DChar.win[m] . "wincmd w"
 	call s:ResetDiffCharPair(m)
 	if exists("*matchaddpos")
-		let t:DChar.mpc[m] = matchaddpos(
-			\hlexists("Cursor") ? "Cursor" : "MatchParen",
-			\[[line, cpos, clen]], 0)
+		let t:DChar.pci[m] = matchaddpos(t:DChar.dhl.U,
+						\[[line, cpos, clen]], 0)
 	else
-		let t:DChar.mpc[m] = matchadd(
-			\hlexists("Cursor") ? "Cursor" : "MatchParen",
-			\'\%' . line . 'l\%>' . (cpos - 1) . 'c\%<' .
-			\(cpos + clen) . 'c', 0)
+		let t:DChar.pci[m] = matchadd(t:DChar.dhl.U, '\%' . line .
+			\'l\%>' . (cpos - 1) . 'c\%<' . (cpos + clen) . 'c', 0)
 	endif
 	exec "au! dchar WinEnter <buffer=" . winbufnr(t:DChar.win[m]) .
 				\"> call s:ResetDiffCharPair(" . m . ")"
 	exec t:DChar.win[a:key] . "wincmd w"
-	let &eventignore = ei
+	let &eventignore = save_ei
 endfunction
 
 function! s:ResetDiffCharPair(key)
-	if exists("t:DChar.mpc[a:key]")
-		call matchdelete(t:DChar.mpc[a:key])
-		unlet t:DChar.mpc[a:key]
+	if exists("t:DChar.pci[a:key]")
+		call matchdelete(t:DChar.pci[a:key])
+		unlet t:DChar.pci[a:key]
 		exec "au! dchar WinEnter <buffer=" .
 					\winbufnr(t:DChar.win[a:key]) . ">"
 		echon ""
 	endif
 endfunction
 
-function! s:MarkDiffCharID(on)
-	" mark w:DCharID (0/1/2) on all windows, on : 1 = set, 0 = clear
-	for win in range(1, winnr('$'))
-		call setwinvar(win, "DCharID",
-			\(win == t:DChar.win[1]) ? a:on * 1 :
-			\(win == t:DChar.win[2]) ? a:on * 2 : 0)
+function! s:MarkDiffCharWID(on)
+	" mark w:DCharWID (1/2) on diffchar windows or delete them
+	for wvr in map(range(1, winnr('$')), 'getwinvar(v:val, "")')
+		if has_key(wvr, "DCharWID") | unlet wvr["DCharWID"] | endif
 	endfor
+	if a:on
+		call map([1, 2],
+			\'setwinvar(t:DChar.win[v:val], "DCharWID", v:val)')
+	endif
 endfunction
 
-function! s:RefreshDiffCharWin()
+function! s:RefreshDiffCharWID()
 	" find diffchar windows and set their winnr to t:DChar.win again
 	let t:DChar.win = {}
 	for win in range(1, winnr('$'))
-		let id = getwinvar(win, "DCharID", 0)
+		let id = get(getwinvar(win, ''), "DCharWID", 0)
 		if id | let t:DChar.win[id] = win | endif
 	endfor
 endfunction
@@ -1376,85 +1537,125 @@ function! s:TraceDiffChar(u1, u2)
 endfunction
 
 if has("patch-7.4.682")
-function! s:ToggleDiffTextHL(on)
+function! s:ToggleDiffHL(on)
 	" no need in no-diff mode
 	if !exists("t:DChar.vdl") | return | endif
 
-	" number of tabpages where DiffText area has been overwritten
+	" number of tabpages where DiffChange/DiffText have been overwritten
 	let tn = len(filter(map(range(1, tabpagenr('$')),
 			\'gettabvar(v:val, "DChar")'),
 			\'!empty(v:val) && exists("v:val.dtm")'))
 
 	if a:on
-		call s:OverwriteDiffTextArea()
+		" globally disable DiffChange/DiffText at the first ON
 		if tn == 0
-			" disable HL at the first ON among all tabpages
-			let s:originalHL = &highlight
-			let &highlight = join(filter(split(s:originalHL, ','),
-				\'v:val[0] !~ "\\C[CT]"'), ',') . ",Cn,Tn"
+			" if either of fg and attr is set, disable its HL
+			let ct = ''
+			for dh in ['C', 'T']
+				for at in ["fg", "bold", "italic",
+					\"underline", "undercurl", "reverse",
+					\"inverse", "standout"]
+					let vl = synIDattr(
+						\hlID(t:DChar.dhl[dh]), at)
+					if !empty(vl) && vl != -1
+						let ct .= dh
+						break
+					endif
+				endfor
+				if ct == 'C' | let ct = 'CT' | break | endif
+			endfor
+			if !empty(ct)
+				let s:save_hl = &highlight
+				let &highlight = join(map(split(s:save_hl,
+					\','), 'v:val[0] =~# "[" . ct . "]" ?
+					\v:val[0] . "n" : v:val'), ',')
+				let s:overwrite_ct = split(ct, '\zs')
+			endif
+		endif
+		if exists("s:overwrite_ct")
+			call s:OverwriteDiffHL(s:overwrite_ct)
 		endif
 	else
-		call s:RestoreDiffTextArea()
-		if tn == 1
-			" restore HL at the last OFF among all tabpages
-			let &highlight = s:originalHL
-			unlet s:originalHL
+		" globally restore DiffChange/DiffText at the last OFF
+		if exists("s:overwrite_ct")
+			if tn == 1
+				let &highlight = s:save_hl
+				unlet s:save_hl
+				unlet s:overwrite_ct
+			endif
+			call s:RestoreDiffHL()
 		endif
 	endif
 endfunction
 
-function! s:OverwriteDiffTextArea()
-	" overwrite diff's DiffText area with DiffText match
+function! s:OverwriteDiffHL(ct)
+	" overwrite disabled DiffChange/DiffText with its match
 	if exists("t:DChar.dtm") | return | endif
+
 	let t:DChar.dtm = {}
-	let dc = hlID("DiffChange") | let dt = hlID("DiffText")
+
 	let cwin = winnr()
-	let ei = &eventignore | let &eventignore = "all"
+	let save_ei = &eventignore | let &eventignore = "all"
+
 	for k in [1, 2]
 		exec t:DChar.win[k] . "wincmd w"
+
+		if index(a:ct, 'C') != -1 | let cl = t:DChar.vdl[k] | endif
+
+		let tl = []
+		if !exists("s:save_dex")
+			" normal case
+			let dt = hlID(t:DChar.dhl.T)
+			for l in t:DChar.vdl[k]
+				let t = filter(range(1, col([l, '$']) - 1),
+						\'diff_hlID(l, v:val) == dt')
+				if empty(t) | continue | endif
+				let [cs, ce] = [t[0], t[-1]]
+				let tl += [[l, cs, ce - cs + 1]]
+			endfor
+		else
+			" diffexpr exceptional case
+			for l in t:DChar.vdl[k]
+				let h = get(t:DChar.hlc[k], l, [])
+				if empty(h) | continue | endif
+				let cs = h[0][1][h[0][0] == 'd' ? 1 : 0]
+				let ce = h[-1][1][h[-1][0] == 'd' ? 0 : 1]
+				if cs > ce | continue | endif
+				let tl += [[l, cs, ce - cs + 1]]
+			endfor
+		endif
+
 		let t:DChar.dtm[k] = []
-		for l in t:DChar.vdl[k]
-			let t:DChar.dtm[k] += [matchaddpos("DiffChange",
-								\[[l]], -1)]
-			if index([dc, dt], diff_hlID(l, 1)) != -1
-				" normal case
-				let c2 = col([l, '$'])
-				while c2 > 0 && diff_hlID(l, c2) != dt
-					let c2 -= 1
-				endwhile
-				if c2 == 0 | continue | endif
-				let c1 = 1
-				while c1 < c2 && diff_hlID(l, c1) != dt
-					let c1 += 1
-				endwhile
-			else
-				" DiffCharExpr() exceptional case
-				let h = t:DChar.hlc[k][l]
-				let c1 = h[0][0] == 'd' ?
-						\h[0][1][1] : h[0][1][0]
-				let c2 = h[-1][0] == 'd' ?
-						\h[-1][1][0] : h[-1][1][1]
-				if c1 > c2 | continue | endif
-			endif
-			let t:DChar.dtm[k] += [matchaddpos("DiffText",
-						\[[l, c1, c2 - c1 + 1]], -1)]
+		for hl in a:ct
+			let ll = (hl == 'C') ? cl : tl
+			let p = 0
+			while p < len(ll)
+				let t:DChar.dtm[k] += [matchaddpos(
+					\t:DChar.dhl[hl], ll[p : p + 7], -1)]
+				let p += 8
+			endwhile
 		endfor
 	endfor
+
 	exec cwin . "wincmd w"
-	let &eventignore = ei
+	let &eventignore = save_ei
 endfunction
 
-function! s:RestoreDiffTextArea()
-	" delete all the overwritten DiffText matches
+function! s:RestoreDiffHL()
+	" delete all the overwritten DiffChange/DiffText matches
 	if !exists("t:DChar.dtm") | return | endif
+
 	let cwin = winnr()
-	let ei = &eventignore | let &eventignore = "all"
+	let save_ei = &eventignore | let &eventignore = "all"
+
 	for k in [1, 2]
 		exec t:DChar.win[k] . "wincmd w"
 		call map(t:DChar.dtm[k], 'matchdelete(v:val)')
 	endfor
+
 	exec cwin . "wincmd w"
-	let &eventignore = ei
+	let &eventignore = save_ei
+
 	unlet t:DChar.dtm
 endfunction
 endif
